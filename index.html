@@ -1,19 +1,36 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="uk">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Assistant MVP</title>
-  <link rel="stylesheet" href="style.css">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Мікрофон → текст (чернетка)</title>
+  <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
+  <main class="wrap">
+    <h1>Голосовий помічник (чернетка)</h1>
 
-  <button id="startBtn">🎙 Старт</button>
-  <button id="stopBtn">⏹ Стоп</button>
+    <div class="card">
+      <div class="row">
+        <button id="btnStart">🎙️ Старт</button>
+        <button id="btnStop" disabled>⏹️ Стоп</button>
+        <span id="status" class="status">Готово</span>
+      </div>
 
-  <div id="transcript"></div>
-  <div id="detected"></div>
+      <label class="label" for="out">Розпізнаний текст:</label>
+      <textarea id="out" rows="10" placeholder="Тут зʼявиться текст..."></textarea>
 
-  <script src="app.js"></script>
+      <div class="row">
+        <button id="btnClear" class="secondary">Очистити</button>
+        <button id="btnCopy" class="secondary">Копіювати</button>
+      </div>
+
+      <p class="hint">
+        Працює через Web Speech API (розпізнавання мовлення). У деяких браузерах/на iPhone може працювати лише в Safari/Chrome по-різному.
+      </p>
+    </div>
+  </main>
+
+  <script src="./app.js"></script>
 </body>
 </html>

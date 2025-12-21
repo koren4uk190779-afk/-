@@ -13,7 +13,8 @@ const heardEl = document.getElementById("heard");
 const answerEl = document.getElementById("answer");
 const transcriptEl = document.getElementById("transcript"); // поле для общей транскрипции (если есть)
 const outQuestions = document.getElementById("outQuestions"); // textarea/поле для вопросов (если есть)
-const logEl = document.getElementById("log"); // textarea/поле лога (если есть)
+const outText = document.getElementById("outText"); // текст
+const logEl = document.getElementById("outLog");    // лог
 
 let qCount = 0;
 const seenQuestions = new Set();
@@ -251,6 +252,11 @@ r.onresult = (event) => {
   const idx = event.results.length - 1;
   const raw = event.results[idx][0].transcript || "";
   const t = norm(raw);
+  
+ if (outText && "value" in outText) {
+  outText.value += (outText.value ? " " : "") + raw;
+  outText.scrollTop = outText.scrollHeight;
+}
 
   // Логирование текста, чтобы увидеть, что происходит
   log(`HEARD: ${raw}`);

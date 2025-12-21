@@ -11,6 +11,7 @@ const btn =
 const statusEl = document.getElementById("status");
 const heardEl = document.getElementById("heard");
 const answerEl = document.getElementById("answer");
+const transcriptEl = document.getElementById("transcript"); // поле для общей транскрипции (если есть)
 const outQuestions = document.getElementById("outQuestions"); // textarea/поле для вопросов (если есть)
 const logEl = document.getElementById("log"); // textarea/поле лога (если есть)
 

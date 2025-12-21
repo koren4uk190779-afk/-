@@ -147,7 +147,7 @@ function questionScore(phrase) {
   return { score, reasons };
 }
 
-// === Функция для добавления вопроса ===
+// Функция добавления вопроса в поле вывода
 function appendQuestion(q) {
   const clean = extractQuestionTail(q);
   const key = norm(clean);
@@ -160,6 +160,7 @@ function appendQuestion(q) {
 
   qCount += 1;
 
+  // Обновляем поле вывода вопросов
   if (outQuestions && "value" in outQuestions) {
     outQuestions.value += `${qCount}) ${capFirst(clean)}?\n`;
     outQuestions.scrollTop = outQuestions.scrollHeight;
@@ -245,25 +246,29 @@ function buildRecognition() {
     setStatus(`Ошибка распознавания: ${err}. Попробую продолжить…`);
   };
 
-  r.onresult = (event) => {
-    const idx = event.results.length - 1;
-    const raw = event.results[idx][0].transcript || "";
-    const t = norm(raw);
+r.onresult = (event) => {
+  const idx = event.results.length - 1;
+  const raw = event.results[idx][0].transcript || "";
+  const t = norm(raw);
 
-    if (heardEl) heardEl.textContent = raw;
-    log(`HEARD: ${raw}`);
+  // Логирование текста, чтобы увидеть, что происходит
+  log(`HEARD: ${raw}`);
 
-    const { score, reasons } = questionScore(raw);
-    log(`SCORE: ${score} (${reasons.join(",")})`);
+  // Обновляем элемент для отображения распознанного текста
+  if (heardEl) heardEl.textContent = raw;
 
-    if (score >= QUESTION_THRESHOLD) {
-      appendQuestion(raw);
-      if (answerEl) answerEl.textContent = "Питання зафіксовано ✅";
-      return;
-    }
+  const { score, reasons } = questionScore(raw);
+  log(`SCORE: ${score} (${reasons.join(",")})`);
 
-    if (answerEl) answerEl.textContent = "Не схоже на питання (ігнорую).";
-  };
+  // Если это вопрос, добавляем его в список
+  if (score >= QUESTION_THRESHOLD) {
+    appendQuestion(raw);
+    if (answerEl) answerEl.textContent = "Питання зафіксовано ✅";
+    return;
+  }
+
+  if (answerEl) answerEl.textContent = "Не схоже на питання (ігнорую).";
+};
 
   return r;
 }

@@ -59,6 +59,13 @@
       listening = true;
 
       setStatus("🎙️ Слухаю…");
+      let dots = 0;
+      window.__pulse && clearInterval(window.__pulse);
+      window.__pulse = setInterval(() => {
+        if (!restartOnEnd) return;
+        dots = (dots + 1) % 4;
+        setStatus("🎙️ Слухаю" + ".".repeat(dots));
+}, 500);
       setDisabled(btnStart, true);
       setDisabled(btnStop, false);
     } catch (e) {
@@ -76,6 +83,8 @@
     listening = false;
 
     setStatus("Готово");
+    window.__pulse && clearInterval(window.__pulse);
+    window.__pulse = null;
     setDisabled(btnStart, false);
     setDisabled(btnStop, true);
   };
@@ -107,6 +116,10 @@
     const code = event.error || "unknown";
     if (code === "no-speech") {
       setStatus("…тиша (кажи щось у мікрофон)");
+       // мягко перезапускаем, если пользователь не нажимал Стоп
+  if (restartOnEnd) {
+    try { rec.stop(); } catch {}
+  }
       return;
     }
     if (code === "not-allowed" || code === "service-not-allowed") {

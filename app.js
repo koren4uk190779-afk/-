@@ -15,6 +15,8 @@ const transcriptEl = document.getElementById("transcript"); // поле для �
 const outQuestions = document.getElementById("outQuestions"); // textarea/поле для вопросов (если есть)
 const outText = document.getElementById("outText"); // текст
 const logEl = document.getElementById("outLog");    // лог
+// 🔍 ВСТАВИТЬ ВРЕМЕННО ВОТ ЭТО
+console.log("DEBUG outText =", outText);
 
 let qCount = 0;
 const seenQuestions = new Set();
@@ -251,13 +253,18 @@ function buildRecognition() {
 r.onresult = (event) => {
   const idx = event.results.length - 1;
   const raw = event.results[idx][0].transcript || "";
-  const t = norm(raw);
+  
   
  if (outText && "value" in outText) {
   outText.value += (outText.value ? " " : "") + raw;
   outText.scrollTop = outText.scrollHeight;
 }
 
+  const t = norm(raw);
+
+    // дальше твоя логика score / questions
+};
+  
   // Логирование текста, чтобы увидеть, что происходит
   log(`HEARD: ${raw}`);
 

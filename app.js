@@ -300,7 +300,7 @@ r.onresult = (event) => {
   if (answerEl) answerEl.textContent = "Не схоже на питання (ігнорую).";
 };
 
-  return r;
+return r;
 }
 
 function canWork() {

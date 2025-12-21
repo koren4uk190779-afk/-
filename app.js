@@ -28,16 +28,16 @@
 
   // ===== Create recognizer =====
   const rec = new SpeechRecognition();
-  rec.lang = "uk-UA";          // можно поменять на "ru-RU" при желании
-  rec.continuous = false;       // держим сессию
-  rec.interimResults = true;   // показываем черновик текста
+  rec.lang = "uk-UA";
+  rec.continuous = false;     // стабильнее, перезапускаем сами
+  rec.interimResults = true;
   rec.maxAlternatives = 1;
 
-
   let listening = false;
-  let finalText = "";
-  const MAX_CHARS = 4000; // можно 4000–12000, но лучше начать с 4000
   let restartOnEnd = false;
+
+  const MAX_CHARS = 12000; // "хвост" текста
+  let finalText = localStorage.getItem("transcript") || "";
 
   const render = (interim = "") => {
     if (!outEl) return;
@@ -46,13 +46,33 @@
     outEl.value = (t + (i ? "\n\n⏳ " + i : "")).trim();
   };
 
+  // показать то, что уже сохранено
+  render("");
+
+  // ===== Status pulse =====
+  const startPulse = () => {
+    let dots = 0;
+    if (window.__pulse) clearInterval(window.__pulse);
+    window.__pulse = setInterval(() => {
+      if (!restartOnEnd) return;
+      dots = (dots + 1) % 4;
+      setStatus("🎙️ Слухаю" + ".".repeat(dots));
+    }, 500);
+  };
+
+  const stopPulse = () => {
+    if (window.__pulse) clearInterval(window.__pulse);
+    window.__pulse = null;
+  };
+
+  // ===== Start / Stop =====
   const startListening = async () => {
-    // Важно: запуск только по клику пользователя
     if (listening) return;
 
     restartOnEnd = true;
+
     try {
-      // На некоторых браузерах полезно спросить доступ к микрофону заранее:
+      // заранее спросить доступ к микрофону (полезно для некоторых браузеров)
       if (navigator.mediaDevices?.getUserMedia) {
         await navigator.mediaDevices.getUserMedia({ audio: true });
       }
@@ -61,17 +81,17 @@
       listening = true;
 
       setStatus("🎙️ Слухаю…");
-      let dots = 0;
-      window.__pulse && clearInterval(window.__pulse);
-      window.__pulse = setInterval(() => {
-        if (!restartOnEnd) return;
-        dots = (dots + 1) % 4;
-        setStatus("🎙️ Слухаю" + ".".repeat(dots));
-}, 500);
+      startPulse();
+
       setDisabled(btnStart, true);
       setDisabled(btnStop, false);
-    } catch (e) {
+    } catch {
+      restartOnEnd = false;
+      listening = false;
+
       setStatus("❌ Немає доступу до мікрофона (дозволь у налаштуваннях браузера).");
+      stopPulse();
+
       setDisabled(btnStart, false);
       setDisabled(btnStop, true);
     }
@@ -79,14 +99,13 @@
 
   const stopListening = () => {
     restartOnEnd = false;
-    if (!listening) return;
 
     try { rec.stop(); } catch {}
     listening = false;
 
+    stopPulse();
     setStatus("Готово");
-    window.__pulse && clearInterval(window.__pulse);
-    window.__pulse = null;
+
     setDisabled(btnStart, false);
     setDisabled(btnStop, true);
   };
@@ -98,59 +117,65 @@
     for (let i = event.resultIndex; i < event.results.length; i++) {
       const res = event.results[i];
       const text = res[0]?.transcript ?? "";
+
       if (res.isFinal) {
         finalText += (finalText ? "\n" : "") + text.trim();
-          // держим только последние MAX_CHARS символов
-       if (finalText.length > MAX_CHARS) {
-  finalText = finalText.slice(-MAX_CHARS);
-}
- 
+
+        // ограничиваем хвост
+        if (finalText.length > MAX_CHARS) {
+          finalText = finalText.slice(-MAX_CHARS);
+        }
+
+        // сохраняем
+        localStorage.setItem("transcript", finalText);
       } else {
         interim += text;
       }
     }
 
-    render(interim.trim());
+    render(interim);
   };
 
   rec.onerror = (event) => {
-    // Частые ошибки: not-allowed, service-not-allowed, no-speech, audio-capture, network
     const code = event.error || "unknown";
-    if (code === "no-speech") {
-  // просто игнорируем тишину и продолжаем слушать
-  setStatus("🎙️ Слухаю…");
-  return;
-}
 
+    // На ПК лучше игнорировать "тишину"
+    if (code === "no-speech") {
+      setStatus("🎙️ Слухаю…");
+      return;
     }
+
     if (code === "not-allowed" || code === "service-not-allowed") {
       setStatus("❌ Доступ до мікрофона заборонено. Дозволь у браузері.");
       stopListening();
       return;
     }
+
     if (code === "audio-capture") {
       setStatus("❌ Мікрофон не знайдено / зайнятий іншим додатком.");
       stopListening();
       return;
     }
+
     setStatus("⚠️ Помилка розпізнавання: " + code);
   };
 
   rec.onend = () => {
-    // Если браузер сам завершил — перезапускаем, пока пользователь не нажал "Стоп"
     if (restartOnEnd) {
       try {
         rec.start();
+        listening = true;
         setStatus("🎙️ Слухаю…");
       } catch {
-        // иногда start() может падать, тогда разрешаем старт вручную
         listening = false;
+        stopPulse();
         setStatus("⚠️ Зупинилось. Натисни Старт ще раз.");
         setDisabled(btnStart, false);
         setDisabled(btnStop, true);
       }
     } else {
       listening = false;
+      stopPulse();
       setStatus("Готово");
       setDisabled(btnStart, false);
       setDisabled(btnStop, true);
@@ -163,17 +188,17 @@
 
   btnClear?.addEventListener("click", () => {
     finalText = "";
+    localStorage.removeItem("transcript");
     render("");
     setStatus("Очищено");
-    // вернём статус в норму через секунду
-    setTimeout(() => setStatus(listening ? "🎙️ Слухаю…" : "Готово"), 800);
+    setTimeout(() => setStatus(restartOnEnd ? "🎙️ Слухаю…" : "Готово"), 800);
   });
 
   btnCopy?.addEventListener("click", async () => {
     const text = outEl?.value ?? "";
     if (!text.trim()) {
       setStatus("Нема що копіювати");
-      setTimeout(() => setStatus(listening ? "🎙️ Слухаю…" : "Готово"), 800);
+      setTimeout(() => setStatus(restartOnEnd ? "🎙️ Слухаю…" : "Готово"), 800);
       return;
     }
     try {
@@ -182,6 +207,6 @@
     } catch {
       setStatus("⚠️ Не вдалось скопіювати (браузер блокує).");
     }
-    setTimeout(() => setStatus(listening ? "🎙️ Слухаю…" : "Готово"), 900);
+    setTimeout(() => setStatus(restartOnEnd ? "🎙️ Слухаю…" : "Готово"), 900);
   });
 })();

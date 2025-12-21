@@ -1,90 +1,165 @@
-const btnStart = document.getElementById("btnStart");
-const btnStop  = document.getElementById("btnStop");
-const btnClear = document.getElementById("btnClear");
-const btnCopy  = document.getElementById("btnCopy");
-const out      = document.getElementById("out");
-const statusEl = document.getElementById("status");
+(() => {
+  // ===== Helpers =====
+  const $ = (id) => document.getElementById(id);
 
-function setStatus(text) {
-  statusEl.textContent = text;
-}
+  const btnStart = $("btnStart");
+  const btnStop  = $("btnStop");
+  const btnClear = $("btnClear");
+  const btnCopy  = $("btnCopy");
+  const statusEl = $("status");
+  const outEl    = $("out");
 
-const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const setStatus = (text) => { if (statusEl) statusEl.textContent = text; };
+  const setDisabled = (el, v) => { if (el) el.disabled = v; };
 
-let rec = null;
-let isRunning = false;
+  // ===== UI initial state =====
+  setStatus("Готово");
+  setDisabled(btnStop, true);
 
-function ensureRecognition() {
-  if (!SpeechRecognition) return null;
+  // ===== SpeechRecognition detection =====
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
-  const r = new SpeechRecognition();
-  r.lang = "uk-UA";          // украинский
-  r.continuous = true;       // пытаться слушать непрерывно
-  r.interimResults = true;   // промежуточный текст
-
-  let finalText = "";
-
-  r.onstart = () => setStatus("Слухаю…");
-  r.onend = () => {
-    isRunning = false;
-    btnStart.disabled = false;
-    btnStop.disabled = true;
-    setStatus("Зупинено");
-  };
-
-  r.onerror = (e) => {
-    setStatus("Помилка: " + (e.error || "невідома"));
-  };
-
-  r.onresult = (event) => {
-    let interim = "";
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      const res = event.results[i];
-      const text = res[0].transcript;
-      if (res.isFinal) finalText += text + " ";
-      else interim += text;
-    }
-    out.value = (finalText + interim).trim();
-  };
-
-  return r;
-}
-
-btnStart.addEventListener("click", () => {
   if (!SpeechRecognition) {
-    alert("У цьому браузері немає SpeechRecognition. Спробуй інший браузер або інший пристрій.");
+    setStatus("❌ Браузер не підтримує розпізнавання. Спробуй Chrome (Android/PC) або Safari (iPhone).");
+    setDisabled(btnStart, true);
+    setDisabled(btnStop, true);
     return;
   }
-  if (isRunning) return;
 
-  rec = ensureRecognition();
-  try {
-    isRunning = true;
-    btnStart.disabled = true;
-    btnStop.disabled = false;
-    rec.start();
-  } catch (e) {
-    setStatus("Не вдалося запустити");
-    btnStart.disabled = false;
-    btnStop.disabled = true;
-    isRunning = false;
-  }
-});
+  // ===== Create recognizer =====
+  const rec = new SpeechRecognition();
+  rec.lang = "uk-UA";          // можно поменять на "ru-RU" при желании
+  rec.continuous = true;       // держим сессию
+  rec.interimResults = true;   // показываем черновик текста
 
-btnStop.addEventListener("click", () => {
-  if (rec && isRunning) rec.stop();
-});
+  let listening = false;
+  let finalText = "";
+  let restartOnEnd = false;
 
-btnClear.addEventListener("click", () => {
-  out.value = "";
-  setStatus("Очищено");
-});
+  const render = (interim = "") => {
+    if (!outEl) return;
+    outEl.value = (finalText + (interim ? "\n" + interim : "")).trim();
+  };
 
-btnCopy.addEventListener("click", async () => {
-  try {
-    await navigator.clipboard.writeText(out.value);
-    setStatus("Скопійовано");
-  } catch {
-    setStatus("Не можу скопіювати");
-  }
-});
+  const startListening = async () => {
+    // Важно: запуск только по клику пользователя
+    if (listening) return;
+
+    restartOnEnd = true;
+    try {
+      // На некоторых браузерах полезно спросить доступ к микрофону заранее:
+      if (navigator.mediaDevices?.getUserMedia) {
+        await navigator.mediaDevices.getUserMedia({ audio: true });
+      }
+
+      rec.start();
+      listening = true;
+
+      setStatus("🎙️ Слухаю…");
+      setDisabled(btnStart, true);
+      setDisabled(btnStop, false);
+    } catch (e) {
+      setStatus("❌ Немає доступу до мікрофона (дозволь у налаштуваннях браузера).");
+      setDisabled(btnStart, false);
+      setDisabled(btnStop, true);
+    }
+  };
+
+  const stopListening = () => {
+    restartOnEnd = false;
+    if (!listening) return;
+
+    try { rec.stop(); } catch {}
+    listening = false;
+
+    setStatus("Готово");
+    setDisabled(btnStart, false);
+    setDisabled(btnStop, true);
+  };
+
+  // ===== Recognition events =====
+  rec.onresult = (event) => {
+    let interim = "";
+
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const res = event.results[i];
+      const text = res[0]?.transcript ?? "";
+      if (res.isFinal) {
+        finalText += (finalText ? "\n" : "") + text.trim();
+      } else {
+        interim += text;
+      }
+    }
+
+    render(interim.trim());
+  };
+
+  rec.onerror = (event) => {
+    // Частые ошибки: not-allowed, service-not-allowed, no-speech, audio-capture, network
+    const code = event.error || "unknown";
+    if (code === "no-speech") {
+      setStatus("…тиша (кажи щось у мікрофон)");
+      return;
+    }
+    if (code === "not-allowed" || code === "service-not-allowed") {
+      setStatus("❌ Доступ до мікрофона заборонено. Дозволь у браузері.");
+      stopListening();
+      return;
+    }
+    if (code === "audio-capture") {
+      setStatus("❌ Мікрофон не знайдено / зайнятий іншим додатком.");
+      stopListening();
+      return;
+    }
+    setStatus("⚠️ Помилка розпізнавання: " + code);
+  };
+
+  rec.onend = () => {
+    // Если браузер сам завершил — перезапускаем, пока пользователь не нажал "Стоп"
+    if (restartOnEnd) {
+      try {
+        rec.start();
+        setStatus("🎙️ Слухаю…");
+      } catch {
+        // иногда start() может падать, тогда разрешаем старт вручную
+        listening = false;
+        setStatus("⚠️ Зупинилось. Натисни Старт ще раз.");
+        setDisabled(btnStart, false);
+        setDisabled(btnStop, true);
+      }
+    } else {
+      listening = false;
+      setStatus("Готово");
+      setDisabled(btnStart, false);
+      setDisabled(btnStop, true);
+    }
+  };
+
+  // ===== Buttons =====
+  btnStart?.addEventListener("click", startListening);
+  btnStop?.addEventListener("click", stopListening);
+
+  btnClear?.addEventListener("click", () => {
+    finalText = "";
+    render("");
+    setStatus("Очищено");
+    // вернём статус в норму через секунду
+    setTimeout(() => setStatus(listening ? "🎙️ Слухаю…" : "Готово"), 800);
+  });
+
+  btnCopy?.addEventListener("click", async () => {
+    const text = outEl?.value ?? "";
+    if (!text.trim()) {
+      setStatus("Нема що копіювати");
+      setTimeout(() => setStatus(listening ? "🎙️ Слухаю…" : "Готово"), 800);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      setStatus("✅ Скопійовано");
+    } catch {
+      setStatus("⚠️ Не вдалось скопіювати (браузер блокує).");
+    }
+    setTimeout(() => setStatus(listening ? "🎙️ Слухаю…" : "Готово"), 900);
+  });
+})();

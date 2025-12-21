@@ -1,59 +1,45 @@
 <!doctype html>
-<html lang="uk">
+<html lang="ru">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Exam / Meeting Assistant</title>
+  <title>Question Catcher (Experiment)</title>
   <link rel="stylesheet" href="style.css" />
 </head>
-
 <body>
-  <div class="app">
+  <div class="wrap">
     <header class="top">
-      <div class="brand">
-        <div class="dot"></div>
-        <div>
-          <div class="title">Exam / Meeting Assistant</div>
-          <div class="subtitle" id="statusLine">Ініціалізація…</div>
-        </div>
+      <div>
+        <div class="h1">Эксперимент: ловим вопросы из речи</div>
+        <div class="sub" id="status">Нажми «Разрешить микрофон» и диктуй текст.</div>
       </div>
-
-      <div class="modes">
-        <button class="btn" id="btnExam" type="button">Екзамен</button>
-        <button class="btn" id="btnMeeting" type="button">Совещание</button>
-        <button class="btn" id="btnChat" type="button">Чат</button>
+      <div class="actions">
+        <button id="btnMic" class="btn">Разрешить микрофон</button>
+        <button id="btnClear" class="btn ghost">Очистить</button>
       </div>
     </header>
 
     <main class="grid">
       <section class="card">
-        <div class="cardTitle">Стабільний текст (останній фрагмент)</div>
-        <div class="mono" id="stableText">—</div>
-        <div class="hint">Це те, що ми аналізуємо (після стабілізації та паузи).</div>
+        <div class="title">Текст (с точками и вопросами)</div>
+        <textarea id="outText" readonly placeholder="Здесь появится пунктуированный текст..."></textarea>
       </section>
 
       <section class="card">
-        <div class="cardTitle">Виявлене питання (для Екзамену)</div>
-        <div class="mono" id="detectedQuestion">—</div>
-        <div class="hint">У режимі “Екзамен” ми відповідаємо лише на питання.</div>
+        <div class="title">Вопросы (что поймал)</div>
+        <textarea id="outQuestions" readonly placeholder="Здесь появится список вопросов..."></textarea>
       </section>
 
       <section class="card wide">
-        <div class="cardTitle">Відповідь / Підказки</div>
-        <div class="answer" id="finalAnswer">—</div>
-        <div class="hint">Екзамен: точна відповідь з бази. Совещание: факти + підказки по реакціях та тиску.</div>
-      </section>
-
-      <section class="card wide">
-        <div class="cardTitle">Логи (діагностика)</div>
-        <div class="mono log" id="logBox"></div>
-        <div class="hint">Це допомагає зрозуміти, чому “втрачаються” слова або не ловляться питання.</div>
+        <div class="title">Логи алгоритма (почему так решил)</div>
+        <textarea id="outLog" readonly placeholder="Здесь будут причины классификации и события..."></textarea>
       </section>
     </main>
 
-    <footer class="footer">
-      <div>Авто-слухання: <span class="pill" id="listenState">—</span></div>
-      <div>Режим: <span class="pill" id="modeState">—</span></div>
+    <footer class="foot">
+      <span class="pill">PAUSE: <b id="pauseMs">800</b>ms</span>
+      <span class="pill">STABLE: <b id="stableMs">700</b>ms</span>
+      <span class="pill">THRESHOLD: <b id="thr">2</b></span>
     </footer>
   </div>
 

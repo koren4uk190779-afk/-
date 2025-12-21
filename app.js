@@ -237,7 +237,6 @@ function buildRecognition() {
     setStatus("⏸ Зупинено");
   };
 
-  // === Обработчик ошибок (твой, но привязан к реальному rec) ===
   r.onerror = (e) => {
     const err = e?.error || String(e);
 
@@ -250,40 +249,33 @@ function buildRecognition() {
     setStatus(`Ошибка распознавания: ${err}. Попробую продолжить…`);
   };
 
-r.onresult = (event) => {
-  const idx = event.results.length - 1;
-  const raw = event.results[idx][0].transcript || "";
-  // 1. ЛОГ — СРАЗУ
-  log(`HEARD: ${raw}`);
+  r.onresult = (event) => {
+    const idx = event.results.length - 1;
+    const raw = event.results[idx][0].transcript || "";
 
-  // 2. НОРМАЛИЗАЦИЯ
-  const t = norm(raw);
+    log(`HEARD: ${raw}`);
 
-  // 3. СЧЁТ ОЧКОВ (ВОПРОС ИЛИ НЕТ)
-  const { score, reasons } = questionScore(raw);
-  log(`SCORE: ${score} (${reasons.join(",")})`);
+    const { score, reasons } = questionScore(raw);
+    log(`SCORE: ${score} (${reasons.join(",")})`);
 
-  // 4. ЗАПИСЬ ТЕКСТА С ПУНКТУАЦИЕЙ
-  const punct = (score >= QUESTION_THRESHOLD) ? "?" : ".";
-  const textOut = raw.trim().replace(/[.?!]+$/, "") + punct;
+    const punct = score >= QUESTION_THRESHOLD ? "?" : ".";
+    const textOut = raw.trim().replace(/[.?!]+$/, "") + punct;
 
-  if (outText && "value" in outText) {
-    outText.value += (outText.value ? " " : "") + textOut;
-    outText.scrollTop = outText.scrollHeight;
-  }
+    if (outText && "value" in outText) {
+      outText.value += (outText.value ? " " : "") + textOut;
+      outText.scrollTop = outText.scrollHeight;
+    }
 
-  // 5. ЕСЛИ ЭТО ВОПРОС — ДОБАВЛЯЕМ В СПИСОК
-  if (score >= QUESTION_THRESHOLD) {
-    appendQuestion(raw);
-    if (answerEl) answerEl.textContent = "Питання зафіксовано ✅";
-    return;
-  }
+    if (score >= QUESTION_THRESHOLD) {
+      appendQuestion(raw);
+      if (answerEl) answerEl.textContent = "Питання зафіксовано ✅";
+      return;
+    }
 
     if (answerEl) answerEl.textContent = "Не схоже на питання (ігнорую).";
-};
+  };
 
-    
-return r;
+  return r;
 }
 
 function canWork() {

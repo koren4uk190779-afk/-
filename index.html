@@ -1,36 +1,62 @@
 <!doctype html>
 <html lang="uk">
 <head>
-  <meta charset="utf-8" />
+  <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Мікрофон → текст (чернетка)</title>
-  <link rel="stylesheet" href="./style.css" />
+  <title>Exam / Meeting Assistant</title>
+  <link rel="stylesheet" href="style.css" />
 </head>
+
 <body>
-  <main class="wrap">
-    <h1>Голосовий помічник (чернетка)</h1>
-
-    <div class="card">
-      <div class="row">
-        <button id="btnStart">🎙️ Старт</button>
-        <button id="btnStop" disabled>⏹️ Стоп</button>
-        <span id="status" class="status">Готово</span>
+  <div class="app">
+    <header class="top">
+      <div class="brand">
+        <div class="dot"></div>
+        <div>
+          <div class="title">Exam / Meeting Assistant</div>
+          <div class="subtitle" id="statusLine">Ініціалізація…</div>
+        </div>
       </div>
 
-      <label class="label" for="out">Розпізнаний текст:</label>
-      <textarea id="out" rows="10" placeholder="Тут зʼявиться текст..."></textarea>
-
-      <div class="row">
-        <button id="btnClear" class="secondary">Очистити</button>
-        <button id="btnCopy" class="secondary">Копіювати</button>
+      <div class="modes">
+        <button class="btn" id="btnExam" type="button">Екзамен</button>
+        <button class="btn" id="btnMeeting" type="button">Совещание</button>
+        <button class="btn" id="btnChat" type="button">Чат</button>
       </div>
+    </header>
 
-      <p class="hint">
-        Працює через Web Speech API (розпізнавання мовлення). У деяких браузерах/на iPhone може працювати лише в Safari/Chrome по-різному.
-      </p>
-    </div>
-  </main>
+    <main class="grid">
+      <section class="card">
+        <div class="cardTitle">Стабільний текст (останній фрагмент)</div>
+        <div class="mono" id="stableText">—</div>
+        <div class="hint">Це те, що ми аналізуємо (після стабілізації та паузи).</div>
+      </section>
 
-  <script src="./app.js"></script>
+      <section class="card">
+        <div class="cardTitle">Виявлене питання (для Екзамену)</div>
+        <div class="mono" id="detectedQuestion">—</div>
+        <div class="hint">У режимі “Екзамен” ми відповідаємо лише на питання.</div>
+      </section>
+
+      <section class="card wide">
+        <div class="cardTitle">Відповідь / Підказки</div>
+        <div class="answer" id="finalAnswer">—</div>
+        <div class="hint">Екзамен: точна відповідь з бази. Совещание: факти + підказки по реакціях та тиску.</div>
+      </section>
+
+      <section class="card wide">
+        <div class="cardTitle">Логи (діагностика)</div>
+        <div class="mono log" id="logBox"></div>
+        <div class="hint">Це допомагає зрозуміти, чому “втрачаються” слова або не ловляться питання.</div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div>Авто-слухання: <span class="pill" id="listenState">—</span></div>
+      <div>Режим: <span class="pill" id="modeState">—</span></div>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
 </body>
 </html>

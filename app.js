@@ -282,11 +282,7 @@ r.onresult = (event) => {
     if (answerEl) answerEl.textContent = "Не схоже на питання (ігнорую).";
 };
 
-    // дальше твоя логика score / questions
-};
-  
-  // Логирование текста, чтобы увидеть, что происходит
-  log(`HEARD: ${raw}`);
+    
 
   // Обновляем элемент для отображения распознанного текста
   if (heardEl) heardEl.textContent = raw;

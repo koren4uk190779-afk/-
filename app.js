@@ -181,9 +181,11 @@ let audioCtx = null;
 async function ensureMicPermission() {
   try {
     micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    log("Микрофон подключен.");
     return true;
   } catch (e) {
-    log("getUserMedia ERROR: " + (e?.name || e));
+    log("Ошибка при подключении к микрофону: " + (e?.name || e));
+    alert("Ошибка подключения к микрофону. Пожалуйста, проверьте разрешения в браузере.");
     return false;
   }
 }
@@ -192,9 +194,10 @@ async function ensureAudioContext() {
   try {
     audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
     if (audioCtx.state !== "running") await audioCtx.resume();
+    log("Аудио контекст активирован.");
     return true;
   } catch (e) {
-    log("AudioContext ERROR: " + (e?.name || e));
+    log("Ошибка активации аудио контекста: " + (e?.name || e));
     return false;
   }
 }
@@ -285,32 +288,31 @@ async function startListening() {
   const okMic = await ensureMicPermission();
   if (!okMic) {
     setStatus("🚫 Дозвіл на мікрофон не надано. Натисни Allow/Дозволити.");
-    if (answerEl) answerEl.textContent = "Дай дозвіл на мікрофон у браузері для цього сайту.";
+    log("Микрофон не был разрешён.");
     return;
   }
 
   const okCtx = await ensureAudioContext();
   if (!okCtx) {
     setStatus("🚫 Не можу активувати аудіо-контекст.");
-    if (answerEl) answerEl.textContent = "Спробуй оновити сторінку та натиснути кнопку ще раз.";
+    log("Не удаётся активировать аудиоконтекст.");
     return;
   }
 
   rec = rec || buildRecognition();
   if (!rec) {
     setStatus("🚫 Не створився SpeechRecognition.");
+    log("Не создан SpeechRecognition.");
     return;
   }
 
   try {
-    rec.start(); // должно быть строго из клика
+    rec.start();
+    setStatus("🎧 Мікрофон працює, чекаю на розпізнавання...");
+    log("Распознавание начато.");
   } catch (e) {
-    // если уже стартовало/InvalidStateError
-    try { rec.stop(); } catch (_) {}
-    try { rec.start(); } catch (err) {
-      setStatus("🚫 Не стартує розпізнавання.");
-      log("rec.start ERROR: " + (err?.name || err));
-    }
+    log("Ошибка при запуске распознавания речи: " + e);
+    setStatus("🚫 Не стартує розпізнавання.");
   }
 }
 

@@ -283,23 +283,6 @@ r.onresult = (event) => {
 };
 
     
-
-  // Обновляем элемент для отображения распознанного текста
-  if (heardEl) heardEl.textContent = raw;
-
-  const { score, reasons } = questionScore(raw);
-  log(`SCORE: ${score} (${reasons.join(",")})`);
-
-  // Если это вопрос, добавляем его в список
-  if (score >= QUESTION_THRESHOLD) {
-    appendQuestion(raw);
-    if (answerEl) answerEl.textContent = "Питання зафіксовано ✅";
-    return;
-  }
-
-  if (answerEl) answerEl.textContent = "Не схоже на питання (ігнорую).";
-};
-
 return r;
 }
 

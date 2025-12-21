@@ -1,15 +1,14 @@
 /* =========================================================
    Exam / Meeting Assistant — full rewrite (single file)
-   - No start/stop button: listening auto-starts and auto-restarts
-   - Stabilization buffer: analyze only stable text after pause
-   - Modes: Exam / Meeting / Chat
-   - Exam: detect questions + answer from local DB
-   - Meeting: extract facts + realtime coaching (pressure/ignore/manipulation markers)
+   KEY:
+   - No "Внимание, вопрос" marker required
+   - Detect questions from plain transcript using scoring (RU/UA)
+   - Stabilization buffer to avoid "words disappear / rewrite"
+   - Auto listening (no start/stop), auto-restart on silence
+
+   Works with your existing index.html / style.css from previous full package.
 ========================================================= */
 
-/* =========================
-   0) UI HELPERS
-========================= */
 const ui = {
   statusLine: document.getElementById("statusLine"),
   stableText: document.getElementById("stableText"),
@@ -18,7 +17,6 @@ const ui = {
   logBox: document.getElementById("logBox"),
   listenState: document.getElementById("listenState"),
   modeState: document.getElementById("modeState"),
-
   btnExam: document.getElementById("btnExam"),
   btnMeeting: document.getElementById("btnMeeting"),
   btnChat: document.getElementById("btnChat"),
@@ -27,13 +25,11 @@ const ui = {
 function setText(el, text) {
   el.textContent = (text === undefined || text === null || text === "") ? "—" : String(text);
 }
-
 function log(msg, level = "info") {
   const ts = new Date().toLocaleTimeString();
   const line = `[${ts}] ${level.toUpperCase()}: ${msg}\n`;
   ui.logBox.textContent = line + ui.logBox.textContent;
 }
-
 function setActiveButton(mode) {
   ui.btnExam.classList.toggle("active", mode === MODE.EXAM);
   ui.btnMeeting.classList.toggle("active", mode === MODE.MEETING);
@@ -41,7 +37,7 @@ function setActiveButton(mode) {
 }
 
 /* =========================
-   1) MODES
+   MODES
 ========================= */
 const MODE = { EXAM: "exam", MEETING: "meeting", CHAT: "chat" };
 let currentMode = MODE.EXAM;
@@ -53,37 +49,26 @@ function setMode(mode) {
   setText(ui.detectedQuestion, "—");
   setText(ui.finalAnswer, "—");
 
-  // Switch recognition language hint (UA as default)
-  if (recognition) {
-    // Keep uk-UA baseline; can be extended later
-    recognition.lang = "uk-UA";
-  }
+  ui.statusLine.textContent =
+    mode === MODE.EXAM
+      ? "Режим Екзамен: ловимо питання з потоку → відповідаємо з бази."
+      : mode === MODE.MEETING
+        ? "Режим Совещание: фіксуємо факти + підказки (далі розширимо)."
+        : "Режим Чат: відображаємо останній змістовний фрагмент.";
 
-  ui.statusLine.textContent = mode === MODE.EXAM
-    ? "Режим Екзамен: ловимо питання → відповідаємо з бази."
-    : mode === MODE.MEETING
-      ? "Режим Совещание: фіксуємо факти + підказки реагування."
-      : "Режим Чат: показуємо останній змістовний фрагмент.";
-
-  ensureListening(); // auto-listen always
+  ensureListening();
   log(`Switched mode to: ${mode}`);
 }
 
 /* =========================
-   2) SETTINGS: STABILIZATION & SILENCE
+   SETTINGS: stabilization & silence
 ========================= */
-// Text must not change for STABLE_MS => considered stable
-const STABLE_MS = 900;
-
-// After stable, wait SILENCE_COMMIT_MS to "commit" chunk and analyze
-const SILENCE_COMMIT_MS = 1400;
-
-// Long idle: we don't stop, just show state
+const STABLE_MS = 900;          // text must not change for this time
+const SILENCE_COMMIT_MS = 1200; // after stable, wait pause to analyze
 const LONG_IDLE_MS = 60_000;
 
 /* =========================
-   3) LOCAL DB (EXAM)
-   - Add your real questions here later
+   LOCAL DB (EXAM) - demo
 ========================= */
 const questionsDB = [
   {
@@ -101,7 +86,7 @@ const questionsDB = [
 ];
 
 /* =========================
-   4) TEXT NORMALIZATION + FILLERS + QUESTION DETECTION
+   NORMALIZATION + FILLERS
 ========================= */
 const STOP_WORDS = new Set([
   "ага","угу","да","так","ну","добре","алло","ок",
@@ -110,31 +95,17 @@ const STOP_WORDS = new Set([
   "нормально","понятно","добре добре","так так"
 ]);
 
-const QUESTION_STARTERS = [
-  "що","як","коли","де","скільки","чому","навіщо","хто","який","яка","які",
-  "почему","как","когда","где","сколько","зачем","кто","какой","какая","какие"
-];
-
-const QUESTION_HINTS = [
-  "підкажіть","скажіть","можна","чи","чи є","чи буде","чи можна",
-  "скажите","подскажите","можно ли","правильно ли"
-];
-
 function normalizeText(s) {
   return (s || "")
     .toLowerCase()
     .replace(/[“”«»"]/g, "")
-    .replace(/[.,!]/g, " ")
+    .replace(/[.,!;:]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
-
 function normalizeLine(s) {
-  return (s || "")
-    .replace(/\s+/g, " ")
-    .trim();
+  return (s || "").replace(/\s+/g, " ").trim();
 }
-
 function isMostlyFiller(line) {
   const t = normalizeText(line);
   if (!t) return true;
@@ -147,21 +118,8 @@ function isMostlyFiller(line) {
   return false;
 }
 
-function looksLikeQuestion(text) {
-  const t = normalizeText(text);
-  if (!t) return false;
-  if (text.includes("?")) return true;
-
-  if (QUESTION_STARTERS.some(w => t.startsWith(w + " "))) return true;
-  if (QUESTION_STARTERS.some(w => t.includes(" " + w + " "))) return true;
-  if (QUESTION_HINTS.some(h => t.includes(h))) return true;
-  if (t.startsWith("чи ")) return true;
-
-  return false;
-}
-
 /* =========================
-   5) SEGMENTATION (meaning chunks)
+   SEGMENTATION (meaning chunks)
 ========================= */
 function segmentTranscript(rawText) {
   const lines = (rawText || "")
@@ -190,8 +148,7 @@ function segmentTranscript(rawText) {
       lower.startsWith("коротше") ||
       lower.startsWith("ну все") ||
       lower.startsWith("добре давайте") ||
-      lower.startsWith("слухай") ||
-      lower.startsWith("слышь");
+      lower.startsWith("алло");
 
     if (buffer && looksLikeNewTurn) pushBuffer();
 
@@ -206,42 +163,101 @@ function segmentTranscript(rawText) {
 }
 
 /* =========================
-   6) EXAM: Extract questions + DB answer
+   QUESTION DETECTION (SCORING)
+   We compute "question-likeness" score from plain text
 ========================= */
-function extractQuestions(rawText) {
-  const chunks = segmentTranscript(rawText);
-  const questions = [];
+const Q_WORDS_RU = ["что","как","когда","где","куда","зачем","почему","сколько","кто","какой","какая","какие","каково"];
+const Q_WORDS_UA = ["що","як","коли","де","куди","навіщо","чому","скільки","хто","який","яка","які"];
+const Q_PHRASES = [
+  // RU
+  "подскажите", "скажите", "можете", "можно", "нужно ли", "правильно ли", "неправильно ли",
+  "как правильно", "что значит", "как понять", "какое решение", "что делать",
+  // UA
+  "підкажіть", "скажіть", "можна", "чи можна", "чи потрібно", "правильно чи", "як правильно",
+  "що означає", "як зрозуміти", "яке рішення", "що робити"
+];
 
-  for (let i = 0; i < chunks.length; i++) {
-    const c = chunks[i];
-
-    if (looksLikeQuestion(c)) {
-      questions.push({ idx: i, text: c });
-      continue;
-    }
-
-    // Try merge with previous if it looks split
-    if (i > 0) {
-      const prev = chunks[i - 1];
-      const merged = prev + " " + c;
-      if (prev.length < 70 && looksLikeQuestion(merged)) {
-        questions.push({ idx: i - 1, text: merged });
-      }
-    }
+function countHits(text, arr) {
+  let hits = 0;
+  for (const a of arr) {
+    if (text.includes(a)) hits++;
   }
-
-  const seen = new Set();
-  const uniq = [];
-  for (const q of questions) {
-    const k = normalizeText(q.text);
-    if (!seen.has(k)) {
-      seen.add(k);
-      uniq.push(q);
-    }
-  }
-  return { chunks, questions: uniq };
+  return hits;
 }
 
+function questionScore(rawChunk) {
+  const raw = rawChunk || "";
+  const t = normalizeText(raw);
+
+  const reasons = [];
+  let score = 0;
+
+  if (!t) return { score: 0, reasons: ["empty"] };
+
+  // direct question mark helps, but transcript often has none
+  if (raw.includes("?")) { score += 4; reasons.push("has ?"); }
+
+  // question words
+  const ruQ = countHits(` ${t} `, Q_WORDS_RU.map(w => ` ${w} `));
+  const uaQ = countHits(` ${t} `, Q_WORDS_UA.map(w => ` ${w} `));
+  if (ruQ) { score += Math.min(6, ruQ * 2); reasons.push(`ru_qwords:${ruQ}`); }
+  if (uaQ) { score += Math.min(6, uaQ * 2); reasons.push(`ua_qwords:${uaQ}`); }
+
+  // particles “ли/чи”
+  if (t.includes(" ли ")) { score += 2; reasons.push("has 'ли'"); }
+  if (t.startsWith("чи ") || t.includes(" чи ")) { score += 2; reasons.push("has 'чи'"); }
+
+  // phrases that indicate request / clarification
+  const phraseHits = countHits(t, Q_PHRASES);
+  if (phraseHits) { score += Math.min(6, phraseHits * 2); reasons.push(`q_phrases:${phraseHits}`); }
+
+  // common "question objects" (helps for everyday questions like queue)
+  const OBJ_HINTS = ["очеред", "черг", "скільки", "сколько", "час", "година", "годин", "коли", "когда", "де", "где"];
+  const objHits = countHits(t, OBJ_HINTS);
+  if (objHits) { score += Math.min(3, objHits); reasons.push(`obj_hints:${objHits}`); }
+
+  // penalize fillers & pure confirmations
+  const penal = ["все добре", "добре", "понял", "зрозуміло", "ок", "дякую", "спасибо"];
+  if (countHits(t, penal)) { score -= 3; reasons.push("penal:filler"); }
+
+  // length heuristics: too short is often not a real question
+  const len = t.length;
+  if (len < 8) { score -= 2; reasons.push("too_short"); }
+  if (len > 220) { score -= 2; reasons.push("too_long"); }
+
+  return { score: Math.max(0, score), reasons };
+}
+
+/* =========================
+   PICK BEST QUESTION from recent chunks
+   - choose highest score among last N chunks
+========================= */
+function detectBestQuestion(rawText) {
+  const chunks = segmentTranscript(rawText);
+
+  // Consider only last 10 chunks (recent context)
+  const tail = chunks.slice(-10);
+
+  let best = null;
+  for (let i = 0; i < tail.length; i++) {
+    const c = tail[i];
+    const q = questionScore(c);
+
+    if (!best || q.score > best.score) {
+      best = { chunk: c, score: q.score, reasons: q.reasons };
+    }
+  }
+
+  // Threshold: if best score too low => "no question"
+  // You can tune this number. For your case we start with 4.
+  if (!best || best.score < 4) return { chunks, best: null };
+
+  return { chunks, best };
+}
+
+/* =========================
+   EXAM: answer by DB
+========================= */
 function scoreKeywords(text, keywords) {
   const t = normalizeText(text);
   let score = 0;
@@ -255,152 +271,76 @@ function scoreKeywords(text, keywords) {
 
 function findAnswerByDB(questionText) {
   let best = null;
-
   for (const item of questionsDB) {
     const s = scoreKeywords(questionText, item.keywords);
     if (!best || s > best.score) best = { score: s, item };
   }
-
-  // threshold
   if (!best || best.score < 2) return null;
   return best.item.answer;
 }
 
 function pipelineExam(rawText) {
-  const { chunks, questions } = extractQuestions(rawText);
+  const { chunks, best } = detectBestQuestion(rawText);
   const lastChunk = chunks.length ? chunks[chunks.length - 1] : "";
-  const lastQuestion = questions.length ? questions[questions.length - 1].text : null;
 
   setText(ui.stableText, lastChunk || "—");
-  setText(ui.detectedQuestion, lastQuestion || "—");
 
-  if (!lastQuestion) {
-    return { ok: false, type: "no_question", answer: "Я не почув(ла) питання. Сформулюй ще раз коротко." };
+  if (!best) {
+    setText(ui.detectedQuestion, "—");
+    // show debug: top candidates
+    const tail = chunks.slice(-5);
+    const scored = tail.map(c => ({ c, ...questionScore(c) }))
+      .sort((a,b) => b.score - a.score)
+      .slice(0, 3);
+
+    log(
+      "No question detected. Top candidates: " +
+      scored.map(s => `{${s.score}} "${s.c}" [${s.reasons.join(",")}]`).join(" | "),
+      "warn"
+    );
+
+    return {
+      ok: false,
+      type: "no_question",
+      answer: "Я не бачу чіткого питання в тексті. Скажи питання одним реченням (без «да-да/алло»), і зроби паузу 1 секунду.",
+    };
   }
 
-  const ans = findAnswerByDB(lastQuestion);
+  setText(ui.detectedQuestion, best.chunk);
+  log(`Question detected (score=${best.score}): "${best.chunk}" reasons=[${best.reasons.join(", ")}]`);
+
+  const ans = findAnswerByDB(best.chunk);
   if (!ans) {
     return {
       ok: false,
       type: "not_found",
-      question: lastQuestion,
+      question: best.chunk,
       answer: "Питання розпізнано, але відповіді в базі поки немає.",
     };
   }
 
-  return { ok: true, type: "answer", question: lastQuestion, answer: ans };
+  return { ok: true, type: "answer", question: best.chunk, answer: ans };
 }
 
 /* =========================
-   7) MEETING: facts extraction + coaching patterns
+   MEETING / CHAT (simple for now)
 ========================= */
-function extractMeetingFacts(rawText) {
-  const chunks = segmentTranscript(rawText);
-  const tAll = chunks.join(" ");
-
-  const patterns = [
-    { re: /(\d+)\s*(машин|машини|авто|тз)/gi, label: "Кількість ТЗ" },
-    { re: /(черг[аеи].{0,20}(відсутн|нема))/gi, label: "Черга" },
-    { re: /(\d+)\s*(хв|хвилин|годин|година|год)/gi, label: "Час" },
-    { re: /(порядок|чистенько|все добре|добре)/gi, label: "Стан" },
-  ];
-
-  const facts = [];
-  for (const p of patterns) {
-    let m;
-    while ((m = p.re.exec(tAll)) !== null) {
-      facts.push({ type: p.label, value: m[0] });
-    }
-  }
-
-  const uniq = [];
-  const seen = new Set();
-  for (const f of facts) {
-    const k = (f.type + "|" + f.value).toLowerCase();
-    if (!seen.has(k)) {
-      seen.add(k);
-      uniq.push(f);
-    }
-  }
-
-  return { chunks, facts: uniq };
-}
-
-const COACH_PATTERNS = [
-  { tag: "Тиск/поспіх", re: /(терміново|зараз же|негайно|останнє попередження|або інакше)/i,
-    tip: "Не приймай рішення в поспіху. Уточни вимогу та критерії: що саме, до якого часу, хто відповідальний." },
-
-  { tag: "Знецінення", re: /(ти нічого не розумієш|це дурниці|ти завжди|ти ніколи)/i,
-    tip: "Поверни розмову в факти: 'Давайте конкретно: що саме не влаштовує і які приклади?'" },
-
-  { tag: "Ігнор/уникнення", re: /(неважливо|потім|не зараз|я зайнятий|без подробиць)/i,
-    tip: "Зафіксуй питання і попроси строк відповіді: 'Коли повертаємось до цього пункту?'" },
-
-  { tag: "Маніпуляція провиною", re: /(через тебе|ти винен|ти підвів|ти зіпсував)/i,
-    tip: "Попроси конкретику: які дії/рішення призвели до наслідку, що треба змінити зараз." },
-
-  { tag: "Підміна теми", re: /(до речі|взагалі|не про це|давай інше)/i,
-    tip: "Коротко повернись до пункту: 'Закриємо попереднє питання, потім перейдемо далі'." },
-];
-
-function meetingCoachAnalyze(text) {
-  const clean = normalizeText(text);
-  const hits = [];
-
-  for (const p of COACH_PATTERNS) {
-    if (p.re.test(clean)) hits.push({ tag: p.tag, tip: p.tip });
-  }
-
-  const uniq = [];
-  const seen = new Set();
-  for (const h of hits) {
-    if (!seen.has(h.tag)) {
-      seen.add(h.tag);
-      uniq.push(h);
-    }
-  }
-  return uniq;
-}
-
 function pipelineMeeting(rawText) {
-  const { chunks, facts } = extractMeetingFacts(rawText);
+  const chunks = segmentTranscript(rawText);
   const lastChunk = chunks.length ? chunks[chunks.length - 1] : "";
-
   setText(ui.stableText, lastChunk || "—");
   setText(ui.detectedQuestion, "—");
-
-  const coach = lastChunk ? meetingCoachAnalyze(lastChunk) : [];
-
-  const summaryFacts =
-    facts.length ? facts.map(f => `${f.type}: ${f.value}`).join(" | ") : "Фактів/цифр поки не бачу.";
-
-  const coachTips =
-    coach.length ? coach.map(c => `• ${c.tag}: ${c.tip}`).join("\n") : "";
-
-  return {
-    ok: true,
-    type: "meeting",
-    answer:
-      `Фіксація: ${summaryFacts}` + (coachTips ? `\n\nПідказки:\n${coachTips}` : ""),
-  };
+  return { ok: true, type: "meeting", answer: "Совещание: базовый режим. Дальше добавим подсказки/манипуляции по твоему чек-листу." };
 }
 
-/* =========================
-   8) CHAT (simple)
-========================= */
 function pipelineChat(rawText) {
   const chunks = segmentTranscript(rawText);
   const lastChunk = chunks.length ? chunks[chunks.length - 1] : "";
-
   setText(ui.stableText, lastChunk || "—");
   setText(ui.detectedQuestion, "—");
-
   return { ok: true, type: "chat", answer: lastChunk ? `Почув: ${lastChunk}` : "Слухаю." };
 }
 
-/* =========================
-   9) PROCESSOR
-========================= */
 function processTranscript(mode, rawText) {
   if (mode === MODE.EXAM) return pipelineExam(rawText);
   if (mode === MODE.MEETING) return pipelineMeeting(rawText);
@@ -408,51 +348,43 @@ function processTranscript(mode, rawText) {
 }
 
 /* =========================
-   10) STABILIZER (fix “words disappear / rewrite”)
+   STABILIZER (fix “rewriting transcript”)
 ========================= */
 let lastRaw = "";
-let lastChangeAt = 0;
 let stableTimer = null;
 let silenceTimer = null;
 let lastActivityAt = Date.now();
 
 function onTranscriptUpdate(newRawText) {
   lastActivityAt = Date.now();
-  const now = Date.now();
 
   if (newRawText !== lastRaw) {
     lastRaw = newRawText;
-    lastChangeAt = now;
 
-    // wait until stable
     if (stableTimer) clearTimeout(stableTimer);
     stableTimer = setTimeout(() => {
-      // stable reached
       if (silenceTimer) clearTimeout(silenceTimer);
       silenceTimer = setTimeout(() => {
         const result = processTranscript(currentMode, lastRaw);
         setText(ui.finalAnswer, result?.answer || "—");
-        ui.statusLine.textContent = `Слухаю… (стабільно, аналіз виконано)`;
-        log(`Analyzed (${currentMode}). Result type: ${result?.type || "?"}`);
+        ui.statusLine.textContent = "Слухаю… (аналіз виконано)";
+        log(`Analyzed (${currentMode}). Result: ${result?.type || "?"}`);
       }, SILENCE_COMMIT_MS);
     }, STABLE_MS);
-  } else {
-    // same text: nothing
   }
 }
 
-// Long idle: do NOT stop anything
+// long idle: do not stop
 setInterval(() => {
   const idle = Date.now() - lastActivityAt;
   if (idle > LONG_IDLE_MS) {
     ui.statusLine.textContent = "Пауза (тиша). Я все ще слухаю.";
-    // don't spam
     lastActivityAt = Date.now();
   }
 }, 2500);
 
 /* =========================
-   11) SPEECH RECOGNITION (auto-start, auto-restart)
+   SPEECH RECOGNITION (auto-start/restart)
 ========================= */
 let recognition = null;
 let listeningWanted = true;
@@ -463,15 +395,16 @@ function ensureListening() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) {
     ui.listenState.textContent = "NO (browser)";
-    ui.statusLine.textContent = "Браузер не підтримує SpeechRecognition. Потрібен Chrome/Edge.";
-    log("SpeechRecognition not supported by this browser.", "warn");
+    ui.statusLine.textContent = "SpeechRecognition не підтримується. Потрібен Chrome/Edge.";
+    log("SpeechRecognition not supported.", "warn");
     return;
   }
 
   if (!recognition) {
     recognition = new SR();
+    // You speak RU/UA; uk-UA is ok, transcript still contains RU words often.
     recognition.lang = "uk-UA";
-    recognition.interimResults = true; // gives “rewriting” — we handle by stabilizer
+    recognition.interimResults = true;
     recognition.continuous = true;
 
     recognition.onresult = (event) => {
@@ -484,14 +417,12 @@ function ensureListening() {
     };
 
     recognition.onerror = (e) => {
-      // Do not stop on no-speech / silence
       const err = e?.error || String(e);
       ui.statusLine.textContent = `SR помилка: ${err} (перезапуск…)`;
       log(`SR error: ${err}`, "warn");
     };
 
     recognition.onend = () => {
-      // Browser may stop on silence; we restart
       if (listeningWanted) {
         ui.statusLine.textContent = "Перезапуск слухання…";
         try { recognition.start(); } catch (_) {}
@@ -502,20 +433,19 @@ function ensureListening() {
   try {
     recognition.start();
     ui.statusLine.textContent = "Слухання активне.";
-    log("Listening started/ensured.");
-  } catch (e) {
+    log("Listening ensured.");
+  } catch (_) {
     // start can throw if called twice quickly
   }
 }
 
 /* =========================
-   12) WIRE UI + BOOT
+   WIRE UI + BOOT
 ========================= */
 ui.btnExam.addEventListener("click", () => setMode(MODE.EXAM));
 ui.btnMeeting.addEventListener("click", () => setMode(MODE.MEETING));
 ui.btnChat.addEventListener("click", () => setMode(MODE.CHAT));
 
-// Boot
 setActiveButton(currentMode);
 setText(ui.modeState, currentMode);
 setText(ui.listenState, "—");

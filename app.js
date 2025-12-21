@@ -253,14 +253,34 @@ function buildRecognition() {
 r.onresult = (event) => {
   const idx = event.results.length - 1;
   const raw = event.results[idx][0].transcript || "";
-  
-  
- if (outText && "value" in outText) {
-  outText.value += (outText.value ? " " : "") + raw;
-  outText.scrollTop = outText.scrollHeight;
-}
+  // 1. ЛОГ — СРАЗУ
+  log(`HEARD: ${raw}`);
 
+  // 2. НОРМАЛИЗАЦИЯ
   const t = norm(raw);
+
+  // 3. СЧЁТ ОЧКОВ (ВОПРОС ИЛИ НЕТ)
+  const { score, reasons } = questionScore(raw);
+  log(`SCORE: ${score} (${reasons.join(",")})`);
+
+  // 4. ЗАПИСЬ ТЕКСТА С ПУНКТУАЦИЕЙ
+  const punct = (score >= QUESTION_THRESHOLD) ? "?" : ".";
+  const textOut = raw.trim().replace(/[.?!]+$/, "") + punct;
+
+  if (outText && "value" in outText) {
+    outText.value += (outText.value ? " " : "") + textOut;
+    outText.scrollTop = outText.scrollHeight;
+  }
+
+  // 5. ЕСЛИ ЭТО ВОПРОС — ДОБАВЛЯЕМ В СПИСОК
+  if (score >= QUESTION_THRESHOLD) {
+    appendQuestion(raw);
+    if (answerEl) answerEl.textContent = "Питання зафіксовано ✅";
+    return;
+  }
+
+    if (answerEl) answerEl.textContent = "Не схоже на питання (ігнорую).";
+};
 
     // дальше твоя логика score / questions
 };

@@ -34,6 +34,7 @@
 
   let listening = false;
   let finalText = "";
+  const MAX_CHARS = 4000; // можно 4000–12000, но лучше начать с 4000
   let restartOnEnd = false;
 
   const render = (interim = "") => {
@@ -86,6 +87,11 @@
       const text = res[0]?.transcript ?? "";
       if (res.isFinal) {
         finalText += (finalText ? "\n" : "") + text.trim();
+          // держим только последние MAX_CHARS символов
+       if (finalText.length > MAX_CHARS) {
+  finalText = finalText.slice(-MAX_CHARS);
+}
+ 
       } else {
         interim += text;
       }

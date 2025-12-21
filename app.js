@@ -29,8 +29,10 @@
   // ===== Create recognizer =====
   const rec = new SpeechRecognition();
   rec.lang = "uk-UA";          // можно поменять на "ru-RU" при желании
-  rec.continuous = true;       // держим сессию
+  rec.continuous = false;       // держим сессию
   rec.interimResults = true;   // показываем черновик текста
+  rec.maxAlternatives = 1;
+
 
   let listening = false;
   let finalText = "";

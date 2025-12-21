@@ -1,3 +1,72 @@
+// =====================
+// Luba — app.js (целиком)
+// =====================
+
+// --- DOM ---
+const btn =
+  document.getElementById("startBtn") ||
+  document.getElementById("btnMic") ||
+  document.querySelector("button");
+
+const statusEl = document.getElementById("status");
+const heardEl = document.getElementById("heard");
+const answerEl = document.getElementById("answer");
+const outQuestions = document.getElementById("outQuestions"); // textarea/поле для вопросов (если есть)
+const logEl = document.getElementById("log"); // textarea/поле лога (если есть)
+
+let qCount = 0;
+const seenQuestions = new Set();
+
+// --- helpers ---
+function log(s) {
+  const msg = String(s ?? "");
+  console.log(msg);
+  if (logEl && "value" in logEl) {
+    logEl.value += msg + "\n";
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+}
+
+function setStatus(s) {
+  if (statusEl) statusEl.textContent = s;
+  log("STATUS: " + s);
+}
+
+function norm(s) {
+  return String(s ?? "")
+    .toLowerCase()
+    .replace(/[’'`]/g, "ʼ")
+    .replace(/[^\p{L}\p{N}\s\?\-]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function capFirst(s) {
+  const t = String(s ?? "").trim();
+  if (!t) return t;
+  return t[0].toUpperCase() + t.slice(1);
+}
+
+function hitWord(t, w) {
+  // отдельное слово
+  const re = new RegExp(`(^|\\s)${w}(\\s|$)`, "i");
+  return re.test(t);
+}
+
+function isFillerOnly(t) {
+  const fillers = [
+    "ну", "типу", "короче", "значить", "як би", "якби", "вобщем", "вообще",
+    "ээ", "ем", "мм", "ага", "угу", "так", "да", "ні", "не", "ок", "окей"
+  ];
+  const words = norm(t).split(" ").filter(Boolean);
+  if (!words.length) return true;
+  return words.every((w) => fillers.includes(w));
+}
+
+// =====================
+// Контрольные фразы и якоря (твои)
+// =====================
+
 // === Контрольные фразы и маркеры для вопросов ===
 const Q_PHRASES = [
   // русские фразы
@@ -8,7 +77,7 @@ const Q_PHRASES = [
 
   // украинские фразы
   "підкажи", "підкажіть", "скажіть", "можна", "чи можна", "чи потрібно", "на підставі чого",
-  "якою статтею", "яким пунктом", "яким законом", "чому", "скільки", "куди", "коли", "хто", "чем",
+  "якою статтею", "яким пунктом", "яким законом", "чому", "скільки", "куди", "коли", "хто", "чим",
   "якою", "яка", "які", "яким чином", "яким способом"
 ];
 
@@ -16,9 +85,7 @@ const Q_PHRASES = [
 const Q_WORDS_RU = ["что", "как", "когда", "где", "куда", "почему", "сколько", "кто", "какой", "который"];
 const Q_WORDS_UA = ["що", "як", "коли", "де", "куди", "чому", "скільки", "хто", "який", "якою", "які"];
 
-// === Функция для извлечения вопроса ===
-const seenQuestions = new Set();
-
+// Якоря для вырезания хвоста вопроса
 const QUESTION_ANCHORS = [
   "почему", "зачем", "как", "что", "когда", "где", "куда", "сколько", "кто",
   "который", "которая", "которое", "которые", "подскажи", "скажите", "скажи", "можно", "можете", "нужно ли", "правильно ли", "как понять",
@@ -48,41 +115,10 @@ function extractQuestionTail(phrase) {
   return raw.slice(pos).trim();
 }
 
-// === Функция для добавления вопроса ===
-function appendQuestion(q) {
-  const clean = extractQuestionTail(q);
-  const key = norm(clean);
-
-  if (!key || seenQuestions.has(key)) {
-    log(`QUESTION skipped (duplicate/empty): "${clean}"`);
-    return;
-  }
-  seenQuestions.add(key);
-
-  qCount += 1;
-  outQuestions.value += `${qCount}) ${capFirst(clean)}?\n`;
-}
-
-// === Обработчик ошибок ===
-rec.onerror = (e) => {
-  const err = e?.error || String(e);
-
-  if (err === "no-speech") {
-    // это просто тишина — не спамим логом
-    setStatus("Тишина… жду речь.");
-    return;
-  }
-
-  log(`SR ERROR: ${err}`);
-  setStatus(`Ошибка распознавания: ${err}. Попробую продолжить…`);
-};
-
 // === Дополнительные улучшения для более точного распознавания ===
-const QUESTION_THRESHOLD = 1;  // Уменьшили порог для более агрессивного распознавания
-const Q_WORDS_RU = ["что", "как", "когда", "где", "куда", "почему", "сколько", "кто", "какой", "который"];
-const Q_WORDS_UA = ["що", "як", "коли", "де", "куди", "чому", "скільки", "хто", "який", "якою", "які"];
+const QUESTION_THRESHOLD = 1; // агрессивнее
 
-// === Функция для проверки слов в вопросе ===
+// === Функция для проверки "похоже ли на вопрос" ===
 function questionScore(phrase) {
   const raw = phrase || "";
   const t = norm(raw);
@@ -110,3 +146,194 @@ function questionScore(phrase) {
 
   return { score, reasons };
 }
+
+// === Функция для добавления вопроса ===
+function appendQuestion(q) {
+  const clean = extractQuestionTail(q);
+  const key = norm(clean);
+
+  if (!key || seenQuestions.has(key)) {
+    log(`QUESTION skipped (duplicate/empty): "${clean}"`);
+    return;
+  }
+  seenQuestions.add(key);
+
+  qCount += 1;
+
+  if (outQuestions && "value" in outQuestions) {
+    outQuestions.value += `${qCount}) ${capFirst(clean)}?\n`;
+    outQuestions.scrollTop = outQuestions.scrollHeight;
+  } else {
+    log(`QUESTION: ${qCount}) ${capFirst(clean)}?`);
+  }
+}
+
+// =====================
+// Микрофон + распознавание (фикс кнопки iPhone/Safari)
+// =====================
+
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null;
+let listening = false;
+let micStream = null;
+let audioCtx = null;
+
+async function ensureMicPermission() {
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    return true;
+  } catch (e) {
+    log("getUserMedia ERROR: " + (e?.name || e));
+    return false;
+  }
+}
+
+async function ensureAudioContext() {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state !== "running") await audioCtx.resume();
+    return true;
+  } catch (e) {
+    log("AudioContext ERROR: " + (e?.name || e));
+    return false;
+  }
+}
+
+function stopTracks() {
+  try {
+    if (micStream) {
+      micStream.getTracks().forEach((t) => t.stop());
+      micStream = null;
+    }
+  } catch (_) {}
+}
+
+function buildRecognition() {
+  if (!SpeechRecognition) return null;
+
+  const r = new SpeechRecognition();
+  r.lang = "uk-UA";
+  r.continuous = true;
+  r.interimResults = false;
+  r.maxAlternatives = 1;
+
+  r.onstart = () => {
+    listening = true;
+    if (btn) btn.textContent = "⏹ Зупинити мікрофон";
+    setStatus("🎧 Слухаю…");
+  };
+
+  r.onend = () => {
+    listening = false;
+    if (btn) btn.textContent = "🎙 Увімкнути мікрофон";
+    setStatus("⏸ Зупинено");
+  };
+
+  // === Обработчик ошибок (твой, но привязан к реальному rec) ===
+  r.onerror = (e) => {
+    const err = e?.error || String(e);
+
+    if (err === "no-speech") {
+      setStatus("Тишина… жду речь.");
+      return;
+    }
+
+    log(`SR ERROR: ${err}`);
+    setStatus(`Ошибка распознавания: ${err}. Попробую продолжить…`);
+  };
+
+  r.onresult = (event) => {
+    const idx = event.results.length - 1;
+    const raw = event.results[idx][0].transcript || "";
+    const t = norm(raw);
+
+    if (heardEl) heardEl.textContent = raw;
+    log(`HEARD: ${raw}`);
+
+    const { score, reasons } = questionScore(raw);
+    log(`SCORE: ${score} (${reasons.join(",")})`);
+
+    if (score >= QUESTION_THRESHOLD) {
+      appendQuestion(raw);
+      if (answerEl) answerEl.textContent = "Питання зафіксовано ✅";
+      return;
+    }
+
+    if (answerEl) answerEl.textContent = "Не схоже на питання (ігнорую).";
+  };
+
+  return r;
+}
+
+function canWork() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    setStatus("🚫 Немає доступу до мікрофона (getUserMedia недоступний).");
+    return false;
+  }
+  if (!SpeechRecognition) {
+    setStatus("🚫 Розпізнавання мови не підтримується в цьому браузері.");
+    return false;
+  }
+  return true;
+}
+
+async function startListening() {
+  if (!canWork()) return;
+
+  setStatus("⏳ Перевіряю мікрофон…");
+
+  const okMic = await ensureMicPermission();
+  if (!okMic) {
+    setStatus("🚫 Дозвіл на мікрофон не надано. Натисни Allow/Дозволити.");
+    if (answerEl) answerEl.textContent = "Дай дозвіл на мікрофон у браузері для цього сайту.";
+    return;
+  }
+
+  const okCtx = await ensureAudioContext();
+  if (!okCtx) {
+    setStatus("🚫 Не можу активувати аудіо-контекст.");
+    if (answerEl) answerEl.textContent = "Спробуй оновити сторінку та натиснути кнопку ще раз.";
+    return;
+  }
+
+  rec = rec || buildRecognition();
+  if (!rec) {
+    setStatus("🚫 Не створився SpeechRecognition.");
+    return;
+  }
+
+  try {
+    rec.start(); // должно быть строго из клика
+  } catch (e) {
+    // если уже стартовало/InvalidStateError
+    try { rec.stop(); } catch (_) {}
+    try { rec.start(); } catch (err) {
+      setStatus("🚫 Не стартує розпізнавання.");
+      log("rec.start ERROR: " + (err?.name || err));
+    }
+  }
+}
+
+function stopListening() {
+  try { if (rec) rec.stop(); } catch (_) {}
+  stopTracks();
+  setStatus("⏸ Зупинено");
+}
+
+function init() {
+  rec = buildRecognition();
+
+  if (btn) {
+    btn.disabled = false;
+    btn.addEventListener("click", async () => {
+      if (!listening) await startListening();
+      else stopListening();
+    });
+    btn.textContent = "🎙 Увімкнути мікрофон";
+    setStatus("Готово. Натисни кнопку, щоб увімкнути мікрофон.");
+  } else {
+    setStatus("⚠️ Не знайдена кнопка на сторінці (startBtn/btnMic).");
+  }
+}
+
+init();

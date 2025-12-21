@@ -41,7 +41,9 @@
 
   const render = (interim = "") => {
     if (!outEl) return;
-    outEl.value = (finalText + (interim ? "\n" + interim : "")).trim();
+    const t = finalText.trim();
+    const i = interim.trim();
+    outEl.value = (t + (i ? "\n\n⏳ " + i : "")).trim();
   };
 
   const startListening = async () => {
@@ -115,12 +117,11 @@
     // Частые ошибки: not-allowed, service-not-allowed, no-speech, audio-capture, network
     const code = event.error || "unknown";
     if (code === "no-speech") {
-      setStatus("…тиша (кажи щось у мікрофон)");
-       // мягко перезапускаем, если пользователь не нажимал Стоп
-  if (restartOnEnd) {
-    try { rec.stop(); } catch {}
-  }
-      return;
+  // просто игнорируем тишину и продолжаем слушать
+  setStatus("🎙️ Слухаю…");
+  return;
+}
+
     }
     if (code === "not-allowed" || code === "service-not-allowed") {
       setStatus("❌ Доступ до мікрофона заборонено. Дозволь у браузері.");

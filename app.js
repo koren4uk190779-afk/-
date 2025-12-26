@@ -1,6 +1,9 @@
 // LUBA v0.31 — iOS SAFE MODE + запись сегментов (без распознавания текста)
 // ✅ iPhone Safari: getUserMedia + AudioContext + MediaRecorder
 // ❌ без SpeechRecognition
+const START_TH = 18;      // порог входа в речь
+const STOP_TH  = 12;      // порог выхода (ниже, чтобы не рвало)
+const SILENCE_CONFIRM_MS = 350; // тишина должна длиться минимум столько
 
 const ui = {
   status: document.getElementById("status"),
@@ -41,11 +44,7 @@ let speaking = false;
 let lastSpeechMs = 0;
 let speechStartMs = 0;
 
-const PAUSE_MS = 1500;
-const THRESH_ENERGY = 18;
 
-if (ui.pauseMsLabel) ui.pauseMsLabel.textContent = String(PAUSE_MS);
-if (ui.thrLabel) ui.thrLabel.textContent = String(THRESH_ENERGY);
 
 function nowMs() { return Date.now(); }
 
@@ -130,15 +129,22 @@ function redrawTextAreas() {
 function loop() {
   if (!running) return;
 
-  const e = energyFromAnalyser();
+  const e = energyFromAnalyser();  // 0..~128
   const t = nowMs();
 
   const lvl = Math.round(e);
-  const state = speaking ? "🗣️ речь" : "🤫 тишина";
-  setLive(`${state} | уровень: ${lvl} | порог: ${THRESH_ENERGY}`);
   if (lvl > 0 && (lvl % 10 === 0)) logLine(`LEVEL=${lvl}`);
 
-  const isSpeechNow = e >= THRESH_ENERGY;
+  // ---- VAD (гистерезис + подтверждение тишины) ----
+  let isSpeechNow = false;
+
+  if (!speaking) {
+    // Входим в речь только по верхнему порогу
+    isSpeechNow = (e >= START_TH);
+  } else {
+    // Пока говорим — считаем речь, пока не упали ниже нижнего порога
+    isSpeechNow = (e >= STOP_TH);
+  }
 
   if (isSpeechNow) {
     if (!speaking) {
@@ -149,46 +155,42 @@ function loop() {
       setStatus("🎙️ Слушаю… говори");
       logLine("SPEECH START");
 
-      // старт записи сегмента
       startSegmentRecording();
     } else {
       lastSpeechMs = t;
     }
   } else {
     if (speaking) {
-      const since = t - lastSpeechMs;
-      if (since >= PAUSE_MS) {
-        // конец фразы
+      const silenceFor = t - lastSpeechMs;
+
+      // Закрываем сегмент только если тишина держится N мс
+      if (silenceFor >= SILENCE_CONFIRM_MS) {
         const dur = t - speechStartMs;
         speaking = false;
 
         setStatus("⏸️ Пауза…");
-        logLine(`SPEECH END (dur=${dur}ms, pause=${since}ms)`);
+        logLine(`SPEECH END (dur=${dur}ms, silence=${silenceFor}ms)`);
 
-        // пока эвристика вопроса простая: фраза > 600мс
         const isQ = dur > 600;
 
         stopSegmentRecordingAndStore().then((res) => {
           currentSegmentIndex += 1;
+
+          segments.unshift({
+            idx: currentSegmentIndex,
+            startMs: speechStartMs,
+            endMs: t,
+            durMs: dur,
+            isQuestion: isQ,
+            blobSize: res?.size || 0,
+            blob: res?.blob || null,
+          });
+
           setStatus(`✅ Сегмент #${currentSegmentIndex} сохранён (${Math.round((res?.size || 0) / 1024)}KB)`);
-
-
-       segments.unshift({
-  idx: currentSegmentIndex,
-  startMs: speechStartMs,
-  endMs: t,
-  durMs: dur,
-  isQuestion: isQ,
-  blobSize: res?.size || 0,
-  blob: res?.blob || null,   // ← ВАЖНО
-});
-
-
           if (isQ) setBadge("❓ POSSIBLE QUESTION");
           logLine(isQ ? `SEGMENT #${currentSegmentIndex} saved as QUESTION` : `SEGMENT #${currentSegmentIndex} saved`);
 
           redrawTextAreas();
-
           setTimeout(() => { if (!speaking) setBadge("—"); }, 2500);
         });
       }
@@ -197,6 +199,7 @@ function loop() {
 
   rafId = requestAnimationFrame(loop);
 }
+
 
 async function startMic() {
   try {

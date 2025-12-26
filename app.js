@@ -41,8 +41,8 @@ let speaking = false;
 let lastSpeechMs = 0;
 let speechStartMs = 0;
 
-const PAUSE_MS = 600;
-const THRESH_ENERGY = 10;
+const PAUSE_MS = 1500;
+const THRESH_ENERGY = 24;
 
 if (ui.pauseMsLabel) ui.pauseMsLabel.textContent = String(PAUSE_MS);
 if (ui.thrLabel) ui.thrLabel.textContent = String(THRESH_ENERGY);

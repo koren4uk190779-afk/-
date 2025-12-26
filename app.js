@@ -1,100 +1,134 @@
-// LUBA / LIVE SPEECH MODE v0.1
-// iPhone Safari: распознавание запускается ТОЛЬКО по клику
+// LUBA / LIVE SPEECH MODE v0.2 (под твой index.html)
 
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
 const ui = {
-  start: document.getElementById("btnStart"),
-  stop: document.getElementById("btnStop"),
-  live: document.getElementById("liveText"),
   status: document.getElementById("status"),
+  btnMic: document.getElementById("btnMic"),
+  btnClear: document.getElementById("btnClear"),
+  outText: document.getElementById("outText"),
+  outQuestions: document.getElementById("outQuestions"),
+  outLog: document.getElementById("outLog"),
+
+  btnStart: document.getElementById("btnStart"),
+  btnStop: document.getElementById("btnStop"),
+  liveText: document.getElementById("liveText"),
   badge: document.getElementById("badge"),
 };
 
 function setStatus(t) { if (ui.status) ui.status.textContent = t; }
-function setBadge(t)  { if (ui.badge)  ui.badge.textContent  = t; }
-function setLive(t)   { if (ui.live)   ui.live.textContent   = t; }
-
-function isQuestion(text) {
-  const t = (text || "").trim().toLowerCase();
-  if (!t) return false;
-
-  // 1) Явные знаки вопроса
-  if (t.includes("?") || t.includes("¿")) return true;
-
-  // 2) Триггер-слова (RU/UA) — можно расширять
-  const starters = [
-    "почему", "зачем", "как", "когда", "куда", "кто", "что", "сколько",
-    "можно", "нужно ли", "правильно ли", "что делать", "на основании чего",
-
-    "чому", "навіщо", "як", "коли", "куди", "хто", "що", "скільки",
-    "можна", "чи можна", "чи потрібно", "чи потрібно", "що робити", "на підставі чого"
-  ];
-
-  // вопрос чаще начинается с них, но не всегда — поэтому проверяем "в начале"
-  for (const s of starters) {
-    if (t.startsWith(s + " ") || t === s) return true;
-  }
-
-  // 3) "ли / чи" как индикатор
-  if (t.includes(" ли ") || t.endsWith(" ли") || t.includes(" чи ") || t.endsWith(" чи")) return true;
-
-  return false;
+function setBadge(t)  { if (ui.badge) ui.badge.textContent = t; }
+function setLive(t)   { if (ui.liveText) ui.liveText.textContent = t; }
+function logLine(t) {
+  if (!ui.outLog) return;
+  const ts = new Date().toLocaleTimeString();
+  ui.outLog.value = `[${ts}] ${t}\n` + ui.outLog.value;
 }
-
-let rec = null;
-let listening = false;
-let finalText = "";       // накопление финальных фраз
-let interimText = "";     // текущая "живая" фраза
 
 function ensureSupportOrFail() {
   if (!SpeechRecognition) {
     setStatus("❌ SpeechRecognition не поддерживается. Открой в Safari на iPhone.");
+    logLine("SpeechRecognition NOT SUPPORTED");
     return false;
   }
   return true;
 }
 
 async function requestMicPermission() {
-  // На iOS иногда помогает явно запросить mic до SpeechRecognition
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    // сразу освобождаем
     stream.getTracks().forEach(tr => tr.stop());
     return true;
   } catch (e) {
     setStatus("❌ Нет доступа к микрофону. Разреши микрофон в Safari для сайта.");
+    logLine("getUserMedia ERROR: " + (e?.name || e));
     return false;
   }
 }
 
+// --- Детектор вопроса ---
+function isQuestion(text) {
+  const t = (text || "").trim().toLowerCase();
+  if (!t) return false;
+
+  if (t.includes("?") || t.includes("¿")) return true;
+
+  const starters = [
+    // RU
+    "почему", "зачем", "как", "когда", "куда", "кто", "что", "сколько",
+    "можно", "нужно ли", "правильно ли", "неправильно ли",
+    "что делать", "на основании чего",
+    // UA
+    "чому", "навіщо", "як", "коли", "куди", "хто", "що", "скільки",
+    "можна", "чи можна", "чи потрібно", "чи правильно",
+    "що робити", "на підставі чого",
+  ];
+
+  for (const s of starters) {
+    if (t.startsWith(s + " ") || t === s) return true;
+  }
+
+  if (t.includes(" ли ") || t.endsWith(" ли")) return true;
+  if (t.includes(" чи ") || t.endsWith(" чи")) return true;
+
+  return false;
+}
+
+function splitQuestions(fullText) {
+  const parts = (fullText || "").split("?");
+  const qs = [];
+  for (let i = 0; i < parts.length - 1; i++) {
+    const q = (parts[i] || "").trim();
+    if (q) qs.push(q + "?");
+  }
+  return qs;
+}
+
+// --- Речь ---
+let rec = null;
+let listening = false;
+
+let finalText = "";
+let interimText = "";
+
 function render() {
   const merged = [finalText.trim(), interimText.trim()].filter(Boolean).join(" ");
   setLive(merged || "…");
-  setBadge(isQuestion(merged) ? "❓ QUESTION DETECTED" : "—");
+
+  const q = isQuestion(merged);
+  setBadge(q ? "❓ QUESTION DETECTED" : "—");
+
+  if (ui.outText) ui.outText.value = merged;
+
+  if (ui.outQuestions) {
+    const qs = splitQuestions(merged);
+    ui.outQuestions.value = qs.join("\n");
+  }
 }
 
 function startRec() {
   if (!ensureSupportOrFail()) return;
 
   rec = new SpeechRecognition();
-  rec.lang = "uk-UA";           // основной язык украинский (можешь менять на ru-RU при необходимости)
+  rec.lang = "uk-UA";
   rec.interimResults = true;
   rec.continuous = true;
 
   rec.onstart = () => {
     listening = true;
     setStatus("🎙️ Слушаю… говори");
-    setBadge("—");
+    logLine("REC START");
   };
 
   rec.onerror = (e) => {
     setStatus("⚠️ Ошибка: " + (e?.error || "unknown"));
+    logLine("REC ERROR: " + (e?.error || e));
   };
 
   rec.onend = () => {
     listening = false;
     setStatus("⏹️ Остановлено");
+    logLine("REC END");
   };
 
   rec.onresult = (event) => {
@@ -105,10 +139,8 @@ function startRec() {
       const txt = (res[0]?.transcript || "").trim();
 
       if (res.isFinal) {
-        // финальная фраза
         finalText = (finalText + " " + txt).trim();
       } else {
-        // живая фраза
         interimText = txt;
       }
     }
@@ -116,11 +148,11 @@ function startRec() {
     render();
   };
 
-  // старт
   try {
     rec.start();
   } catch (e) {
     setStatus("⚠️ Не удалось стартовать: " + (e?.name || e));
+    logLine("REC START FAIL: " + (e?.name || e));
   }
 }
 
@@ -130,12 +162,11 @@ function stopRec() {
   setStatus("⏹️ Остановлено");
 }
 
-async function onStartClick() {
+async function onStart() {
   setStatus("…");
   const ok = await requestMicPermission();
   if (!ok) return;
 
-  // очистка на новый запуск (можешь убрать, если нужно сохранять)
   finalText = "";
   interimText = "";
   render();
@@ -143,14 +174,30 @@ async function onStartClick() {
   startRec();
 }
 
-function onStopClick() {
+function onStop() {
   stopRec();
 }
 
-if (ui.start) ui.start.addEventListener("click", onStartClick);
-if (ui.stop) ui.stop.addEventListener("click", onStopClick);
+function onClear() {
+  finalText = "";
+  interimText = "";
+  if (ui.outText) ui.outText.value = "";
+  if (ui.outQuestions) ui.outQuestions.value = "";
+  if (ui.outLog) ui.outLog.value = "";
+  setLive("…");
+  setBadge("—");
+  setStatus("Очищено. Нажми START и говори.");
+  logLine("CLEARED");
+}
 
-// первичное состояние
-setStatus("Готово. Нажми START и говори.");
+// Привязки
+if (ui.btnStart) ui.btnStart.addEventListener("click", onStart);
+if (ui.btnStop) ui.btnStop.addEventListener("click", onStop);
+if (ui.btnMic) ui.btnMic.addEventListener("click", onStart);
+if (ui.btnClear) ui.btnClear.addEventListener("click", onClear);
+
+// стартовое состояние
+setStatus("Готово. Нажми START (или «Разрешить микрофон») и говори.");
 setLive("…");
 setBadge("—");
+logLine("APP READY");

@@ -40,8 +40,8 @@ let speaking = false;
 let lastSpeechMs = 0;
 let speechStartMs = 0;
 
-const PAUSE_MS = 900;
-const THRESH_ENERGY = 18;
+const PAUSE_MS = 600;
+const THRESH_ENERGY = 10;
 
 if (ui.pauseMsLabel) ui.pauseMsLabel.textContent = String(PAUSE_MS);
 if (ui.thrLabel) ui.thrLabel.textContent = String(THRESH_ENERGY);
@@ -77,6 +77,9 @@ function startSegmentRecording() {
     recorder.ondataavailable = (e) => { if (e.data && e.data.size) recChunks.push(e.data); };
     recorder.onstart = () => logLine("SEGMENT REC START");
     recorder.start();
+    setStatus("🎙️ REC: запись сегмента…");
+    logLine("RECORDER STARTED");
+
   } catch (e) {
     logLine("MediaRecorder ERROR: " + (e?.name || e));
   }
@@ -85,20 +88,29 @@ function startSegmentRecording() {
 function stopSegmentRecordingAndStore() {
   return new Promise((resolve) => {
     if (!recorder) return resolve(null);
+
     try {
       recorder.onstop = () => {
-        const blob = new Blob(recChunks, { type: recorder.mimeType || "audio/mp4" });
+        const chunks = recChunks;                 // берём ДО очистки
+        const mime = recorder?.mimeType || "audio/mp4";
+
+        recorder = null;                          // чистим ПОСЛЕ
+        recChunks = [];
+
+        const blob = new Blob(chunks, { type: mime });
         resolve({ blob, size: blob.size });
       };
+
       recorder.stop();
-    } catch {
-      resolve(null);
-    } finally {
+    } catch (e) {
       recorder = null;
       recChunks = [];
+      resolve(null);
     }
   });
 }
+
+
 
 function redrawTextAreas() {
   if (ui.outText) {
@@ -156,6 +168,8 @@ function loop() {
 
         stopSegmentRecordingAndStore().then((res) => {
           currentSegmentIndex += 1;
+          setStatus(`✅ Сегмент #${currentSegmentIndex} сохранён (${Math.round((res?.size || 0) / 1024)}KB)`);
+
 
           segments.unshift({
             idx: currentSegmentIndex,

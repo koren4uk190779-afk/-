@@ -42,7 +42,7 @@ let lastSpeechMs = 0;
 let speechStartMs = 0;
 
 const PAUSE_MS = 1500;
-const THRESH_ENERGY = 24;
+const THRESH_ENERGY = 18;
 
 if (ui.pauseMsLabel) ui.pauseMsLabel.textContent = String(PAUSE_MS);
 if (ui.thrLabel) ui.thrLabel.textContent = String(THRESH_ENERGY);
@@ -136,6 +136,7 @@ function loop() {
   const lvl = Math.round(e);
   const state = speaking ? "🗣️ речь" : "🤫 тишина";
   setLive(`${state} | уровень: ${lvl} | порог: ${THRESH_ENERGY}`);
+  if (lvl > 0 && (lvl % 10 === 0)) logLine(`LEVEL=${lvl}`);
 
   const isSpeechNow = e >= THRESH_ENERGY;
 

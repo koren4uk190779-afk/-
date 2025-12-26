@@ -1,6 +1,6 @@
-// LUBA v0.3 — iOS SAFE MODE
-// ✅ работает на iPhone Safari: getUserMedia + AudioContext
-// ❌ без SpeechRecognition (потому что iOS часто даёт service-not-allowed)
+// LUBA v0.31 — iOS SAFE MODE + запись сегментов (без распознавания текста)
+// ✅ iPhone Safari: getUserMedia + AudioContext + MediaRecorder
+// ❌ без SpeechRecognition
 
 const ui = {
   status: document.getElementById("status"),
@@ -13,6 +13,8 @@ const ui = {
   outText: document.getElementById("outText"),
   outQuestions: document.getElementById("outQuestions"),
   outLog: document.getElementById("outLog"),
+  pauseMsLabel: document.getElementById("pauseMs"),
+  thrLabel: document.getElementById("thr"),
 };
 
 function setStatus(t) { ui.status && (ui.status.textContent = t); }
@@ -24,7 +26,6 @@ function logLine(t) {
   ui.outLog.value = `[${ts}] ${t}\n` + ui.outLog.value;
 }
 
-// --------- Audio engine ----------
 let stream = null;
 let audioCtx = null;
 let sourceNode = null;
@@ -34,49 +35,83 @@ let rafId = null;
 
 let running = false;
 
-// VAD (очень простой)
+// VAD
 let speaking = false;
 let lastSpeechMs = 0;
 let speechStartMs = 0;
 
-// "вопрос" — простая эвристика по окончанию фразы:
-// если была речь и потом пауза >= PAUSE_MS, считаем "возможный вопрос"
-// позже заменим на STT/интонацию/словари
-const PAUSE_MS = 900;     // пауза после речи
-const THRESH_ENERGY = 18; // порог энергии (0..~60). Если тихо — увеличь/уменьши
+const PAUSE_MS = 900;
+const THRESH_ENERGY = 18;
+
+if (ui.pauseMsLabel) ui.pauseMsLabel.textContent = String(PAUSE_MS);
+if (ui.thrLabel) ui.thrLabel.textContent = String(THRESH_ENERGY);
 
 function nowMs() { return Date.now(); }
 
 function energyFromAnalyser() {
-  // берём временной сигнал и считаем среднюю "амплитуду"
   analyser.getByteTimeDomainData(data);
   let sum = 0;
   for (let i = 0; i < data.length; i++) {
-    const v = data[i] - 128;      // центр 0
+    const v = data[i] - 128;
     sum += Math.abs(v);
   }
-  return sum / data.length; // средняя амплитуда
+  return sum / data.length;
 }
 
-function renderMeters(energy) {
-  // Показываем "уровень" и состояние
-  const lvl = Math.round(energy);
-  const state = speaking ? "🗣️ речь" : "🤫 тишина";
-  setLive(`${state} | уровень: ${lvl} | порог: ${THRESH_ENERGY}`);
-  if (ui.outText) ui.outText.value = `Energy=${lvl} | Speaking=${speaking}`;
-}
+// ---- Запись аудио сегментов ----
+let recorder = null;
+let recChunks = [];
+let currentSegmentIndex = 0;
 
-function pushQuestionMarker(reason) {
-  setBadge("❓ POSSIBLE QUESTION");
-  const line = `❓ Возможный вопрос (конец фразы) — ${reason}`;
-  if (ui.outQuestions) {
-    ui.outQuestions.value = (line + "\n") + (ui.outQuestions.value || "");
+const segments = []; // {idx, startMs, endMs, durMs, isQuestion, blobSize}
+
+function startSegmentRecording() {
+  if (!stream) return;
+  if (!window.MediaRecorder) {
+    logLine("MediaRecorder NOT SUPPORTED (некоторые iOS версии)");
+    return;
   }
-  logLine(line);
-  // сброс бейджа через пару секунд
-  setTimeout(() => {
-    if (!speaking) setBadge("—");
-  }, 2500);
+  try {
+    recChunks = [];
+    recorder = new MediaRecorder(stream, { mimeType: "audio/mp4" });
+    recorder.ondataavailable = (e) => { if (e.data && e.data.size) recChunks.push(e.data); };
+    recorder.onstart = () => logLine("SEGMENT REC START");
+    recorder.start();
+  } catch (e) {
+    logLine("MediaRecorder ERROR: " + (e?.name || e));
+  }
+}
+
+function stopSegmentRecordingAndStore() {
+  return new Promise((resolve) => {
+    if (!recorder) return resolve(null);
+    try {
+      recorder.onstop = () => {
+        const blob = new Blob(recChunks, { type: recorder.mimeType || "audio/mp4" });
+        resolve({ blob, size: blob.size });
+      };
+      recorder.stop();
+    } catch {
+      resolve(null);
+    } finally {
+      recorder = null;
+      recChunks = [];
+    }
+  });
+}
+
+function redrawTextAreas() {
+  if (ui.outText) {
+    ui.outText.value = segments
+      .map(s => `#${s.idx} | dur=${Math.round(s.durMs)}ms | audio=${Math.round(s.blobSize/1024)}KB | ${s.isQuestion ? "❓" : "—"}`)
+      .join("\n");
+  }
+  if (ui.outQuestions) {
+    ui.outQuestions.value = segments
+      .filter(s => s.isQuestion)
+      .map(s => `❓ Сегмент #${s.idx} (dur=${Math.round(s.durMs)}ms) — возможный вопрос`)
+      .join("\n");
+  }
 }
 
 function loop() {
@@ -84,7 +119,10 @@ function loop() {
 
   const e = energyFromAnalyser();
   const t = nowMs();
-  renderMeters(e);
+
+  const lvl = Math.round(e);
+  const state = speaking ? "🗣️ речь" : "🤫 тишина";
+  setLive(`${state} | уровень: ${lvl} | порог: ${THRESH_ENERGY}`);
 
   const isSpeechNow = e >= THRESH_ENERGY;
 
@@ -92,25 +130,49 @@ function loop() {
     if (!speaking) {
       speaking = true;
       speechStartMs = t;
-      logLine("SPEECH START");
+      lastSpeechMs = t;
+
       setStatus("🎙️ Слушаю… говори");
-      setBadge("—");
+      logLine("SPEECH START");
+
+      // старт записи сегмента
+      startSegmentRecording();
+    } else {
+      lastSpeechMs = t;
     }
-    lastSpeechMs = t;
   } else {
     if (speaking) {
-      // уже была речь, теперь тишина
       const since = t - lastSpeechMs;
       if (since >= PAUSE_MS) {
         // конец фразы
         const dur = t - speechStartMs;
         speaking = false;
-        logLine(`SPEECH END (dur=${dur}ms, pause=${since}ms)`);
+
         setStatus("⏸️ Пауза…");
-        // эвристика: если фраза длилась > 600мс — считаем, что это "сказал что-то"
-        if (dur > 600) {
-          pushQuestionMarker(`пауза ${since}ms после речи`);
-        }
+        logLine(`SPEECH END (dur=${dur}ms, pause=${since}ms)`);
+
+        // пока эвристика вопроса простая: фраза > 600мс
+        const isQ = dur > 600;
+
+        stopSegmentRecordingAndStore().then((res) => {
+          currentSegmentIndex += 1;
+
+          segments.unshift({
+            idx: currentSegmentIndex,
+            startMs: speechStartMs,
+            endMs: t,
+            durMs: dur,
+            isQuestion: isQ,
+            blobSize: res?.size || 0,
+          });
+
+          if (isQ) setBadge("❓ POSSIBLE QUESTION");
+          logLine(isQ ? `SEGMENT #${currentSegmentIndex} saved as QUESTION` : `SEGMENT #${currentSegmentIndex} saved`);
+
+          redrawTextAreas();
+
+          setTimeout(() => { if (!speaking) setBadge("—"); }, 2500);
+        });
       }
     }
   }
@@ -121,11 +183,7 @@ function loop() {
 async function startMic() {
   try {
     stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true
-      }
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
     });
   } catch (e) {
     setStatus("❌ Нет доступа к микрофону. Разреши микрофон в Safari для сайта.");
@@ -173,7 +231,6 @@ function stopMic() {
   rafId = null;
 
   try { sourceNode && sourceNode.disconnect(); } catch {}
-  try { analyser && analyser.disconnect && analyser.disconnect(); } catch {}
 
   if (stream) {
     stream.getTracks().forEach(tr => tr.stop());
@@ -189,33 +246,33 @@ function stopMic() {
 }
 
 function clearAll() {
+  segments.length = 0;
+  currentSegmentIndex = 0;
+
   if (ui.outText) ui.outText.value = "";
   if (ui.outQuestions) ui.outQuestions.value = "";
   if (ui.outLog) ui.outLog.value = "";
+
   setLive("…");
   setBadge("—");
   setStatus("Очищено. Нажми START/«Разрешить микрофон».");
   logLine("CLEARED");
 }
 
-// Кнопки
 async function onStart() {
   if (running) return;
   setStatus("…");
   await startMic();
 }
 
-function onStop() {
-  stopMic();
-}
+function onStop() { stopMic(); }
 
 if (ui.btnStart) ui.btnStart.addEventListener("click", onStart);
 if (ui.btnStop) ui.btnStop.addEventListener("click", onStop);
 if (ui.btnMic) ui.btnMic.addEventListener("click", onStart);
 if (ui.btnClear) ui.btnClear.addEventListener("click", clearAll);
 
-// init
 setStatus("Готово. Нажми START (или «Разрешить микрофон»).");
 setLive("…");
 setBadge("—");
-logLine("APP READY v0.3");
+logLine("APP READY v0.31");

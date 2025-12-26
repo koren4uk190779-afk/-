@@ -11,13 +11,31 @@
     <header class="top">
       <div>
         <div class="h1">Эксперимент: ловим вопросы из речи</div>
-        <div class="sub" id="status">Нажми «Разрешить микрофон» и диктуй текст.</div>
+        <div class="sub" id="status">Готово. Нажми START и говори.</div>
       </div>
+
       <div class="actions">
+        <!-- Твои старые кнопки оставил (можешь потом убрать) -->
         <button id="btnMic" class="btn">Разрешить микрофон</button>
         <button id="btnClear" class="btn ghost">Очистить</button>
       </div>
     </header>
+
+    <!-- ✅ ДОБАВЛЕНО: LIVE блок для LUBA -->
+    <section class="card wide" style="margin-top:12px;">
+      <div class="title">LIVE (LUBA)</div>
+
+      <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px;">
+        <span id="badge" class="pill">—</span>
+
+        <button id="btnStart" class="btn">START</button>
+        <button id="btnStop" class="btn ghost">STOP</button>
+      </div>
+
+      <div id="liveText" style="min-height:44px; padding:10px; border:1px solid rgba(255,255,255,.12); border-radius:10px;">
+        …
+      </div>
+    </section>
 
     <main class="grid">
       <section class="card">

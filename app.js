@@ -8,6 +8,7 @@ const ui = {
   btnClear: document.getElementById("btnClear"),
   btnStart: document.getElementById("btnStart"),
   btnStop: document.getElementById("btnStop"),
+  btnDownload: document.getElementById("btnDownload"),
   liveText: document.getElementById("liveText"),
   badge: document.getElementById("badge"),
   outText: document.getElementById("outText"),
@@ -171,14 +172,16 @@ function loop() {
           setStatus(`✅ Сегмент #${currentSegmentIndex} сохранён (${Math.round((res?.size || 0) / 1024)}KB)`);
 
 
-          segments.unshift({
-            idx: currentSegmentIndex,
-            startMs: speechStartMs,
-            endMs: t,
-            durMs: dur,
-            isQuestion: isQ,
-            blobSize: res?.size || 0,
-          });
+       segments.unshift({
+  idx: currentSegmentIndex,
+  startMs: speechStartMs,
+  endMs: t,
+  durMs: dur,
+  isQuestion: isQ,
+  blobSize: res?.size || 0,
+  blob: res?.blob || null,   // ← ВАЖНО
+});
+
 
           if (isQ) setBadge("❓ POSSIBLE QUESTION");
           logLine(isQ ? `SEGMENT #${currentSegmentIndex} saved as QUESTION` : `SEGMENT #${currentSegmentIndex} saved`);
@@ -280,6 +283,24 @@ async function onStart() {
 }
 
 function onStop() { stopMic(); }
+function downloadLast() {
+  const s = segments[0];
+  if (!s || !s.blob) {
+    setStatus("⚠️ Нет сегмента для скачивания");
+    return;
+  }
+
+  const url = URL.createObjectURL(s.blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `luba_segment_${s.idx}.m4a`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  setStatus(`⬇️ Скачан сегмент #${s.idx}`);
+}
 
 if (ui.btnStart) ui.btnStart.addEventListener("click", onStart);
 if (ui.btnStop) ui.btnStop.addEventListener("click", onStop);

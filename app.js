@@ -1,9 +1,20 @@
-// LUBA v0.31 — iOS SAFE MODE + запись сегментов (без распознавания текста)
-// ✅ iPhone Safari: getUserMedia + AudioContext + MediaRecorder
-// ❌ без SpeechRecognition
-const START_TH = 18;      // порог входа в речь
-const STOP_TH  = 12;      // порог выхода (ниже, чтобы не рвало)
-const SILENCE_CONFIRM_MS = 350; // тишина должна длиться минимум столько
+// LUBA v0.40 — iOS SAFE MODE: запись сегментов + стабильная сегментация (anti-cut)
+// ✅ getUserMedia + AudioContext + MediaRecorder
+// ❌ без SpeechRecognition (на iOS Safari часто service-not-allowed)
+
+const CFG = {
+  // пороги (гистерезис)
+  START_TH: 18,   // вход в речь
+  STOP_TH:  12,   // удержание речи (ниже, чтобы не рвало)
+
+  // паузы
+  SILENCE_CONFIRM_MS: 350, // тишина должна продлиться хотя бы столько, чтобы считаться "реальной"
+  PAUSE_MS: 1600,          // конец фразы только после такой тишины
+  MIN_SEGMENT_MS: 2500,    // короткие сегменты не режем (вдох/пауза внутри)
+
+  // эвристика "вопроса" (временно, пока нет текста)
+  QUESTION_MIN_MS: 2000
+};
 
 const ui = {
   status: document.getElementById("status"),
@@ -30,6 +41,9 @@ function logLine(t) {
   ui.outLog.value = `[${ts}] ${t}\n` + ui.outLog.value;
 }
 
+if (ui.pauseMsLabel) ui.pauseMsLabel.textContent = String(CFG.PAUSE_MS);
+if (ui.thrLabel) ui.thrLabel.textContent = String(CFG.START_TH);
+
 let stream = null;
 let audioCtx = null;
 let sourceNode = null;
@@ -43,8 +57,6 @@ let running = false;
 let speaking = false;
 let lastSpeechMs = 0;
 let speechStartMs = 0;
-
-
 
 function nowMs() { return Date.now(); }
 
@@ -63,23 +75,21 @@ let recorder = null;
 let recChunks = [];
 let currentSegmentIndex = 0;
 
-const segments = []; // {idx, startMs, endMs, durMs, isQuestion, blobSize}
+const segments = []; // {idx, durMs, blobSize, blob, isQuestion}
 
 function startSegmentRecording() {
   if (!stream) return;
   if (!window.MediaRecorder) {
-    logLine("MediaRecorder NOT SUPPORTED (некоторые iOS версии)");
+    logLine("MediaRecorder NOT SUPPORTED");
     return;
   }
   try {
     recChunks = [];
     recorder = new MediaRecorder(stream, { mimeType: "audio/mp4" });
     recorder.ondataavailable = (e) => { if (e.data && e.data.size) recChunks.push(e.data); };
-    recorder.onstart = () => logLine("SEGMENT REC START");
+    recorder.onstart = () => logLine("RECORDER STARTED");
     recorder.start();
     setStatus("🎙️ REC: запись сегмента…");
-    logLine("RECORDER STARTED");
-
   } catch (e) {
     logLine("MediaRecorder ERROR: " + (e?.name || e));
   }
@@ -91,26 +101,21 @@ function stopSegmentRecordingAndStore() {
 
     try {
       recorder.onstop = () => {
-        const chunks = recChunks;                 // берём ДО очистки
+        const chunks = recChunks;
         const mime = recorder?.mimeType || "audio/mp4";
-
-        recorder = null;                          // чистим ПОСЛЕ
+        recorder = null;
         recChunks = [];
-
         const blob = new Blob(chunks, { type: mime });
         resolve({ blob, size: blob.size });
       };
-
       recorder.stop();
-    } catch (e) {
+    } catch {
       recorder = null;
       recChunks = [];
       resolve(null);
     }
   });
 }
-
-
 
 function redrawTextAreas() {
   if (ui.outText) {
@@ -129,32 +134,23 @@ function redrawTextAreas() {
 function loop() {
   if (!running) return;
 
-  const e = energyFromAnalyser();  // 0..~128
+  const e = energyFromAnalyser();
   const t = nowMs();
-
   const lvl = Math.round(e);
-  if (lvl > 0 && (lvl % 10 === 0)) logLine(`LEVEL=${lvl}`);
 
-  // ---- VAD (гистерезис + подтверждение тишины) ----
-  let isSpeechNow = false;
+  setLive(`${speaking ? "🗣️ речь" : "🤫 тишина"} | lvl:${lvl} | start:${CFG.START_TH} stop:${CFG.STOP_TH} | pause:${CFG.PAUSE_MS}`);
 
-  if (!speaking) {
-    // Входим в речь только по верхнему порогу
-    isSpeechNow = (e >= START_TH);
-  } else {
-    // Пока говорим — считаем речь, пока не упали ниже нижнего порога
-    isSpeechNow = (e >= STOP_TH);
-  }
+  // Гистерезис
+  const isSpeechNow = !speaking ? (e >= CFG.START_TH) : (e >= CFG.STOP_TH);
 
   if (isSpeechNow) {
     if (!speaking) {
       speaking = true;
       speechStartMs = t;
       lastSpeechMs = t;
-
-      setStatus("🎙️ Слушаю… говори");
+      setStatus("🎙️ Слушаю…");
+      setBadge("—");
       logLine("SPEECH START");
-
       startSegmentRecording();
     } else {
       lastSpeechMs = t;
@@ -162,44 +158,54 @@ function loop() {
   } else {
     if (speaking) {
       const silenceFor = t - lastSpeechMs;
+      const dur = t - speechStartMs;
 
-      // Закрываем сегмент только если тишина держится N мс
-      if (silenceFor >= SILENCE_CONFIRM_MS) {
-        const dur = t - speechStartMs;
-        speaking = false;
+      // 1) микро-провалы уровня игнорируем
+      if (silenceFor < CFG.SILENCE_CONFIRM_MS) {
+        // ничего
+      }
+      // 2) пауза подтверждена, но ещё не конец фразы
+      else if (silenceFor < CFG.PAUSE_MS) {
+        setStatus("… пауза внутри фразы");
+      }
+      // 3) конец фразы (пауза длинная)
+      else {
+        // анти-рваньё: короткие куски не закрываем
+        if (dur < CFG.MIN_SEGMENT_MS) {
+          logLine(`SKIP CUT short dur=${dur}ms`);
+          // "поддержим" lastSpeechMs, чтобы не закрывало снова мгновенно
+          lastSpeechMs = t - (CFG.PAUSE_MS - 200);
+          setStatus("… продолжаем (коротко)");
+        } else {
+          speaking = false;
+          setStatus("⏸️ Конец фразы");
+          logLine(`SPEECH END dur=${dur}ms silence=${silenceFor}ms`);
 
-        setStatus("⏸️ Пауза…");
-        logLine(`SPEECH END (dur=${dur}ms, silence=${silenceFor}ms)`);
+          const isQ = dur >= CFG.QUESTION_MIN_MS;
 
-        const isQ = dur > 600;
+          stopSegmentRecordingAndStore().then((res) => {
+            currentSegmentIndex += 1;
 
-        stopSegmentRecordingAndStore().then((res) => {
-          currentSegmentIndex += 1;
+            segments.unshift({
+              idx: currentSegmentIndex,
+              durMs: dur,
+              isQuestion: isQ,
+              blobSize: res?.size || 0,
+              blob: res?.blob || null,
+            });
 
-          segments.unshift({
-            idx: currentSegmentIndex,
-            startMs: speechStartMs,
-            endMs: t,
-            durMs: dur,
-            isQuestion: isQ,
-            blobSize: res?.size || 0,
-            blob: res?.blob || null,
+            setStatus(`✅ Сегмент #${currentSegmentIndex} сохранён (${Math.round((res?.size || 0) / 1024)}KB)`);
+            if (isQ) setBadge("❓ POSSIBLE QUESTION");
+            logLine(isQ ? `SEGMENT #${currentSegmentIndex} saved as QUESTION` : `SEGMENT #${currentSegmentIndex} saved`);
+            redrawTextAreas();
           });
-
-          setStatus(`✅ Сегмент #${currentSegmentIndex} сохранён (${Math.round((res?.size || 0) / 1024)}KB)`);
-          if (isQ) setBadge("❓ POSSIBLE QUESTION");
-          logLine(isQ ? `SEGMENT #${currentSegmentIndex} saved as QUESTION` : `SEGMENT #${currentSegmentIndex} saved`);
-
-          redrawTextAreas();
-          setTimeout(() => { if (!speaking) setBadge("—"); }, 2500);
-        });
+        }
       }
     }
   }
 
   rafId = requestAnimationFrame(loop);
 }
-
 
 async function startMic() {
   try {
@@ -280,13 +286,6 @@ function clearAll() {
   logLine("CLEARED");
 }
 
-async function onStart() {
-  if (running) return;
-  setStatus("…");
-  await startMic();
-}
-
-function onStop() { stopMic(); }
 function downloadLast() {
   logLine("DOWNLOAD CLICK");
 
@@ -297,7 +296,7 @@ function downloadLast() {
     return;
   }
   if (!s.blob) {
-    setStatus("⚠️ У сегмента нет blob (добавь blob в segments.unshift)");
+    setStatus("⚠️ У сегмента нет blob");
     logLine("DOWNLOAD: blob missing");
     return;
   }
@@ -315,6 +314,12 @@ function downloadLast() {
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
+async function onStart() {
+  if (running) return;
+  setStatus("…");
+  await startMic();
+}
+function onStop() { stopMic(); }
 
 if (ui.btnStart) ui.btnStart.addEventListener("click", onStart);
 if (ui.btnStop) ui.btnStop.addEventListener("click", onStop);
@@ -325,4 +330,4 @@ if (ui.btnDownload) ui.btnDownload.addEventListener("click", downloadLast);
 setStatus("Готово. Нажми START (или «Разрешить микрофон»).");
 setLive("…");
 setBadge("—");
-logLine("APP READY v0.31");
+logLine("APP READY v0.40");

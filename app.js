@@ -284,9 +284,17 @@ async function onStart() {
 
 function onStop() { stopMic(); }
 function downloadLast() {
+  logLine("DOWNLOAD CLICK");
+
   const s = segments[0];
-  if (!s || !s.blob) {
-    setStatus("⚠️ Нет сегмента для скачивания");
+  if (!s) {
+    setStatus("⚠️ Нет сегментов");
+    logLine("DOWNLOAD: no segments");
+    return;
+  }
+  if (!s.blob) {
+    setStatus("⚠️ У сегмента нет blob (добавь blob в segments.unshift)");
+    logLine("DOWNLOAD: blob missing");
     return;
   }
 
@@ -298,14 +306,17 @@ function downloadLast() {
   a.click();
   a.remove();
 
-  setTimeout(() => URL.revokeObjectURL(url), 2000);
   setStatus(`⬇️ Скачан сегмент #${s.idx}`);
+  logLine(`DOWNLOAD OK: #${s.idx}`);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
+
 
 if (ui.btnStart) ui.btnStart.addEventListener("click", onStart);
 if (ui.btnStop) ui.btnStop.addEventListener("click", onStop);
 if (ui.btnMic) ui.btnMic.addEventListener("click", onStart);
 if (ui.btnClear) ui.btnClear.addEventListener("click", clearAll);
+if (ui.btnDownload) ui.btnDownload.addEventListener("click", downloadLast);
 
 setStatus("Готово. Нажми START (или «Разрешить микрофон»).");
 setLive("…");
